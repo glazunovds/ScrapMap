@@ -1,3 +1,4 @@
+mod asset_catalogue;
 mod atlas_bake;
 mod diagnostic_source;
 mod game_build;

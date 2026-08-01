@@ -21,7 +21,7 @@
 -- twenty seconds on the first world load and nothing afterwards. Lower it to
 -- spread the work across several loads instead.
 
-SCRAPMAP_ATLAS_VERSION = 2
+SCRAPMAP_ATLAS_VERSION = 3
 
 -- Samples per cell edge. Material drives the picture, so it gets one sample per
 -- metre, keeping 8 m roads about 8 px wide. Tint and height vary smoothly and
@@ -73,6 +73,20 @@ local function encodeColor( r, g, b )
 	local g6 = math.floor( g * 63 + 0.5 )
 	local b5 = math.floor( b * 31 + 0.5 )
 	return string.format( "%04X", r5 * 2048 + g6 * 32 + b5 )
+end
+
+-- Placed objects (trees, rocks, buildings, the crashed ship) are assets, not
+-- terrain, so they are invisible to the material and height samplers. Collect
+-- them per tile with a local palette so the uuid is written once rather than
+-- once per instance.
+local ASSET_QUARTER_METRE_MAX = 4095
+
+local function encodeAsset( paletteIndex, x, y )
+	local qx = math.floor( x * 4 + 0.5 )
+	local qy = math.floor( y * 4 + 0.5 )
+	if qx < 0 then qx = 0 elseif qx > ASSET_QUARTER_METRE_MAX then qx = ASSET_QUARTER_METRE_MAX end
+	if qy < 0 then qy = 0 elseif qy > ASSET_QUARTER_METRE_MAX then qy = ASSET_QUARTER_METRE_MAX end
+	return string.format( "%03X%03X%03X", paletteIndex, qx, qy )
 end
 
 local function encodeHeight( h )
@@ -132,6 +146,30 @@ local function sampleTile( uid, size )
 		end
 	end
 
+	-- Assets are per cell rather than per sample, so this is one call per cell.
+	local palette, paletteIndex, assetParts = {}, {}, {}
+	for offsetY = 0, size - 1 do
+		for offsetX = 0, size - 1 do
+			local ok, assets = pcall( sm.terrainTile.getAssetsForCell, uid, offsetX, offsetY, 0 )
+			if ok and type( assets ) == "table" then
+				for _, asset in ipairs( assets ) do
+					local key = tostring( asset.uuid )
+					local index = paletteIndex[key]
+					if index == nil then
+						palette[#palette + 1] = key
+						index = #palette - 1
+						paletteIndex[key] = index
+					end
+					assetParts[#assetParts + 1] = encodeAsset(
+						index,
+						offsetX * CELL + asset.pos.x,
+						offsetY * CELL + asset.pos.y
+					)
+				end
+			end
+		end
+	end
+
 	return {
 		materialSpan = materialSpan,
 		colorSpan = colorSpan,
@@ -139,6 +177,9 @@ local function sampleTile( uid, size )
 		material = table.concat( materialParts ),
 		color = table.concat( colorParts ),
 		height = table.concat( heightParts ),
+		assetPalette = palette,
+		assets = table.concat( assetParts ),
+		assetCount = #assetParts,
 		minHeight = minHeight,
 		maxHeight = maxHeight
 	}
@@ -220,6 +261,10 @@ function ScrapMapBakeAtlas()
 						materialEncoding = "surface-class-hex",
 						encoding = "rgb565-hex",
 						heightEncoding = "decimetre-biased-hex",
+						assetEncoding = "palette-index-quarter-metre-hex",
+						assetCount = result.assetCount,
+						assetPalette = result.assetPalette,
+						assets = result.assets,
 						material = result.material,
 						color = result.color,
 						height = result.height

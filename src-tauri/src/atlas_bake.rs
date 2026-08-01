@@ -10,12 +10,13 @@
 //! Tiles are sampled unrotated, so the output depends only on the game build.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     env,
     fs,
     path::{Path, PathBuf},
 };
 
+use crate::asset_catalogue::{self, AssetInfo, AssetKind};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
@@ -88,6 +89,109 @@ struct BakedTileFile {
     color: String,
     #[serde(default)]
     height: String,
+    #[serde(default)]
+    asset_palette: Vec<String>,
+    #[serde(default)]
+    assets: String,
+}
+
+/// One placed object, in tile-local metres measured from the south-west corner.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacedAsset {
+    pub palette_index: usize,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Decodes the baker's asset stream: palette index, x and y, three hex digits
+/// each, with the coordinates in quarter-metres.
+fn decode_assets(text: &str) -> Result<Vec<PlacedAsset>, String> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !text.len().is_multiple_of(9) {
+        return Err(format!("asset stream length {} is not a multiple of 9", text.len()));
+    }
+    let field = |slice: &str| usize::from_str_radix(slice, 16).map_err(|_| "bad hex".to_owned());
+    let mut placed = Vec::with_capacity(text.len() / 9);
+    for chunk in text.as_bytes().chunks_exact(9) {
+        let chunk = std::str::from_utf8(chunk).map_err(|_| "asset stream is not ASCII")?;
+        placed.push(PlacedAsset {
+            palette_index: field(&chunk[0..3])?,
+            x: field(&chunk[3..6])? as f32 / 4.0,
+            y: field(&chunk[6..9])? as f32 / 4.0,
+        });
+    }
+    Ok(placed)
+}
+
+/// Paints placed objects over the finished terrain.
+///
+/// Larger objects are drawn first so that undergrowth reads on top of the tree
+/// it sits beneath, and each blob fades at its rim so a forest looks like
+/// canopy rather than a field of hard discs.
+pub fn draw_assets(
+    rgba: &mut [u8],
+    span: usize,
+    assets: &[PlacedAsset],
+    palette: &[Option<AssetInfo>],
+    pixels_per_metre: f32,
+) {
+    let mut order: Vec<&PlacedAsset> = assets.iter().collect();
+    order.sort_by(|a, b| {
+        let radius = |item: &PlacedAsset| {
+            palette
+                .get(item.palette_index)
+                .and_then(|entry| entry.as_ref())
+                .map_or(0.0, |info| info.radius)
+        };
+        radius(b)
+            .partial_cmp(&radius(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    for asset in order {
+        let Some(Some(info)) = palette.get(asset.palette_index) else {
+            continue;
+        };
+        if info.kind == AssetKind::Skip {
+            continue;
+        }
+        let radius = info.radius * pixels_per_metre;
+        if !(radius > 0.4) {
+            continue;
+        }
+        let centre_x = asset.x * pixels_per_metre;
+        // Rows run north to south while asset coordinates count northward.
+        let centre_y = span as f32 - asset.y * pixels_per_metre;
+        let opacity = info.kind.opacity();
+
+        let min_x = ((centre_x - radius).floor().max(0.0)) as usize;
+        let max_x = ((centre_x + radius).ceil().min(span as f32 - 1.0)) as usize;
+        let min_y = ((centre_y - radius).floor().max(0.0)) as usize;
+        let max_y = ((centre_y + radius).ceil().min(span as f32 - 1.0)) as usize;
+
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let dx = x as f32 + 0.5 - centre_x;
+                let dy = y as f32 + 0.5 - centre_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance > radius {
+                    continue;
+                }
+                // Solid to about 60% of the radius, then fading to the rim.
+                let edge = ((radius - distance) / (radius * 0.4)).clamp(0.0, 1.0);
+                let alpha = opacity * edge;
+                let offset = (y * span + x) * 4;
+                for channel in 0..3 {
+                    let existing = f32::from(rgba[offset + channel]);
+                    let target = f32::from(info.color[channel]);
+                    rgba[offset + channel] =
+                        (existing * (1.0 - alpha) + target * alpha).clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
 }
 
 /// Base colours for the four surface classes the baker records. These are what
@@ -284,7 +388,10 @@ fn encode_png(rgba: &[u8], span: usize) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn convert_one(bytes: &[u8]) -> Result<(String, Vec<u8>, u32), String> {
+fn convert_one(
+    bytes: &[u8],
+    catalogue: &HashMap<String, AssetInfo>,
+) -> Result<(String, Vec<u8>, u32), String> {
     let tile: BakedTileFile =
         serde_json::from_slice(bytes).map_err(|error| format!("parse: {error}"))?;
 
@@ -309,7 +416,7 @@ fn convert_one(bytes: &[u8]) -> Result<(String, Vec<u8>, u32), String> {
             .collect()
     };
 
-    let rgba = render_tile_rgba(
+    let mut rgba = render_tile_rgba(
         &surface,
         tile.material_span,
         &color,
@@ -317,6 +424,27 @@ fn convert_one(bytes: &[u8]) -> Result<(String, Vec<u8>, u32), String> {
         &height,
         tile.height_span,
     );
+
+    // Trees, rocks, buildings and the crashed ship are assets rather than
+    // terrain, so nothing above sees them.
+    let placed = decode_assets(&tile.assets)?;
+    if !placed.is_empty() {
+        let palette: Vec<Option<AssetInfo>> = tile
+            .asset_palette
+            .iter()
+            .map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()).copied())
+            .collect();
+        let tile_metres = (tile.size.max(1) as f32) * 64.0;
+        let pixels_per_metre = tile.material_span as f32 / tile_metres;
+        draw_assets(
+            &mut rgba,
+            tile.material_span,
+            &placed,
+            &palette,
+            pixels_per_metre,
+        );
+    }
+
     let png = encode_png(&rgba, tile.material_span)?;
     Ok((tile.uuid, png, tile.size))
 }
@@ -419,6 +547,8 @@ pub fn convert_baked_atlas(game_root: &Path, root: &Path) -> Result<AtlasBakeRep
         }
     };
 
+    let catalogue = asset_catalogue::load(game_root, root);
+
     let mut report = AtlasBakeReportV1 {
         converted: 0,
         skipped: 0,
@@ -465,7 +595,7 @@ pub fn convert_baked_atlas(game_root: &Path, root: &Path) -> Result<AtlasBakeRep
                 continue;
             }
         };
-        match convert_one(&bytes) {
+        match convert_one(&bytes, &catalogue) {
             Ok((uuid, png, size)) => {
                 let key = uuid.to_ascii_lowercase();
                 let target = output_dir.join(format!("{key}.png"));
@@ -595,6 +725,77 @@ mod tests {
         );
     }
 
+    fn asset_info(kind: AssetKind, color: [u8; 3], radius: f32) -> Option<AssetInfo> {
+        Some(AssetInfo {
+            kind,
+            color,
+            radius,
+        })
+    }
+
+    #[test]
+    fn asset_stream_decodes_palette_and_quarter_metre_positions() {
+        // index 1, x = 0x008 quarter-metres = 2 m, y = 0x010 = 4 m.
+        let placed = decode_assets("001008010").unwrap();
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].palette_index, 1);
+        assert!((placed[0].x - 2.0).abs() < 0.001);
+        assert!((placed[0].y - 4.0).abs() < 0.001);
+
+        assert!(decode_assets("").unwrap().is_empty());
+        assert!(decode_assets("0010080").is_err(), "ragged stream must fail");
+    }
+
+    #[test]
+    fn assets_paint_over_the_terrain_at_their_position() {
+        let span = 32;
+        let mut rgba = vec![255_u8; span * span * 4];
+        let palette = vec![asset_info(AssetKind::Foliage, [0, 0, 0], 4.0)];
+        // Centre of the tile, one pixel per metre.
+        let placed = [PlacedAsset {
+            palette_index: 0,
+            x: 16.0,
+            y: 16.0,
+        }];
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+
+        let at = |x: usize, y: usize| rgba[(y * span + x) * 4];
+        assert!(at(16, 16) < 200, "the blob centre should be painted");
+        assert_eq!(at(0, 0), 255, "distant terrain must be untouched");
+    }
+
+    #[test]
+    fn water_and_road_assets_are_not_painted() {
+        let span = 16;
+        let mut rgba = vec![255_u8; span * span * 4];
+        let palette = vec![asset_info(AssetKind::Skip, [0, 0, 0], 6.0)];
+        let placed = [PlacedAsset {
+            palette_index: 0,
+            x: 8.0,
+            y: 8.0,
+        }];
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+        assert!(
+            rgba.iter().all(|&value| value == 255),
+            "skipped assets must leave the terrain alone"
+        );
+    }
+
+    #[test]
+    fn unknown_palette_entries_are_ignored_rather_than_panicking() {
+        let span = 8;
+        let mut rgba = vec![255_u8; span * span * 4];
+        // Palette shorter than the highest index the stream references.
+        let palette: Vec<Option<AssetInfo>> = vec![None];
+        let placed = [PlacedAsset {
+            palette_index: 7,
+            x: 4.0,
+            y: 4.0,
+        }];
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+        assert!(rgba.iter().all(|&value| value == 255));
+    }
+
     #[test]
     fn flat_terrain_is_left_unshaded() {
         let surface = vec![0_u8; 4];
@@ -655,7 +856,7 @@ mod tests {
             "color": color,
             "height": height,
         });
-        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap()).unwrap();
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new()).unwrap();
         assert_eq!(uuid, "AB-CD");
         assert_eq!(size, 1);
         assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "not a PNG");
@@ -823,7 +1024,7 @@ mod tests {
             "color": hex_u16(&[0xF800, 0x07E0, 0x001F, 0xFFFF]),
             "height": "",
         });
-        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap())
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new())
             .expect("float-valued counts must parse");
         assert_eq!(uuid, "float-tile");
         assert_eq!(size, 2);
@@ -841,6 +1042,6 @@ mod tests {
             "color": "",
             "height": "",
         });
-        assert!(convert_one(&serde_json::to_vec(&document).unwrap()).is_err());
+        assert!(convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new()).is_err());
     }
 }
