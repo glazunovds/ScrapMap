@@ -1,0 +1,821 @@
+//! Converts the Lua-baked terrain rasters into map tile images.
+//!
+//! The game-side baker (`Survival/Scripts/terrain/ScrapMapAtlasBake.lua`) samples
+//! every registered tile through `sm.terrainTile` and writes one JSON per tile
+//! UUID. This module decodes those rasters, shades them, and emits PNGs into the
+//! existing atlas cache as `generated/<uuid>.png`, then points each manifest
+//! entry's `topDownRelativePath` at the result so the renderer picks them up
+//! without any frontend change.
+//!
+//! Tiles are sampled unrotated, so the output depends only on the game build.
+
+use std::{
+    collections::BTreeMap,
+    env,
+    fs,
+    path::{Path, PathBuf},
+};
+
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{json, Value};
+
+const GENERATED_DIRECTORY: &str = "generated";
+const MAX_BAKED_TILE_BYTES: u64 = 32 * 1024 * 1024;
+/// Survival tiles run from 1x1 up to 16x16 cells, so at 64 samples per cell the
+/// largest legitimate raster is 1024x1024. Allow one size step beyond that.
+const MAX_SPAN: usize = 2048;
+
+/// Strength of the relief shading, as a peak +/- multiplier on the base colour.
+/// Terrain colour already carries roads and biome, so this only needs to hint
+/// at slope without washing the palette out.
+const HILLSHADE_STRENGTH: f32 = 0.28;
+/// Metres of rise per sample step that saturates the shading ramp.
+const HILLSHADE_SCALE: f32 = 6.0;
+
+/// Depth at which terrain reads as water. Ordinary tiles only graze a few
+/// centimetres below zero at their edges, while real lakes cut metres down, so
+/// a small negative threshold separates water from sampling noise.
+const WATER_LEVEL: f32 = -1.0;
+/// Metres below the waterline at which the water is fully opaque.
+const WATER_OPAQUE_DEPTH: f32 = 6.0;
+const WATER_SHALLOW: [f32; 3] = [104.0, 170.0, 198.0];
+const WATER_DEEP: [f32; 3] = [38.0, 86.0, 140.0];
+
+/// Lua has one numeric type, so `sm.json.save` writes every count as a float
+/// (`512.0`). Serde will not coerce that into an integer, so read it as a
+/// double and round.
+fn lua_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let value = f64::deserialize(deserializer)?;
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) {
+        return Err(serde::de::Error::custom(format!(
+            "expected a non-negative count, found {value}"
+        )));
+    }
+    Ok(value.round() as u32)
+}
+
+fn lua_span<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
+    lua_number(deserializer).map(|value| value as usize)
+}
+
+fn default_size() -> u32 {
+    1
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BakedTileFile {
+    uuid: String,
+    #[serde(default = "default_size", deserialize_with = "lua_number")]
+    size: u32,
+    #[serde(default, deserialize_with = "lua_span")]
+    material_span: usize,
+    #[serde(default, deserialize_with = "lua_span")]
+    color_span: usize,
+    #[serde(default, deserialize_with = "lua_span")]
+    height_span: usize,
+    #[serde(default)]
+    material: String,
+    #[serde(default)]
+    color: String,
+    #[serde(default)]
+    height: String,
+}
+
+/// Base colours for the four surface classes the baker records. These are what
+/// make roads and shorelines legible; the sampled tint only nudges them.
+const SURFACE_PALETTE: [[f32; 3]; 4] = [
+    [104.0, 142.0, 68.0],  // grass
+    [214.0, 192.0, 143.0], // sand
+    [146.0, 118.0, 84.0],  // dirt
+    [143.0, 142.0, 138.0], // rock
+];
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AtlasBakeReportV1 {
+    pub converted: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub total_baked: usize,
+}
+
+/// Decodes a run of big-endian `u16` values written as fixed-width hex.
+fn decode_hex_u16(text: &str, expected: usize) -> Result<Vec<u16>, String> {
+    let bytes = text.as_bytes();
+    if bytes.len() != expected * 4 {
+        return Err(format!(
+            "expected {} hex characters, found {}",
+            expected * 4,
+            bytes.len()
+        ));
+    }
+    let mut values = Vec::with_capacity(expected);
+    for chunk in bytes.chunks_exact(4) {
+        let mut value: u16 = 0;
+        for &byte in chunk {
+            let digit = match byte {
+                b'0'..=b'9' => byte - b'0',
+                b'a'..=b'f' => byte - b'a' + 10,
+                b'A'..=b'F' => byte - b'A' + 10,
+                _ => return Err("raster contains a non-hex character".to_owned()),
+            };
+            value = (value << 4) | u16::from(digit);
+        }
+        values.push(value);
+    }
+    Ok(values)
+}
+
+/// Decodes the surface-class raster: one hex digit per sample, 0..3.
+fn decode_surface(text: &str, expected: usize) -> Result<Vec<u8>, String> {
+    let bytes = text.as_bytes();
+    if bytes.len() != expected {
+        return Err(format!(
+            "expected {expected} characters, found {}",
+            bytes.len()
+        ));
+    }
+    bytes
+        .iter()
+        .map(|&byte| match byte {
+            b'0'..=b'9' => Ok(byte - b'0'),
+            b'a'..=b'f' => Ok(byte - b'a' + 10),
+            b'A'..=b'F' => Ok(byte - b'A' + 10),
+            _ => Err("raster contains a non-hex character".to_owned()),
+        })
+        .collect()
+}
+
+fn rgb565_to_rgb888(value: u16) -> [u8; 3] {
+    let r5 = ((value >> 11) & 0x1F) as u32;
+    let g6 = ((value >> 5) & 0x3F) as u32;
+    let b5 = (value & 0x1F) as u32;
+    // Replicate the high bits into the low ones so full-scale stays full-scale.
+    [
+        ((r5 * 255 + 15) / 31) as u8,
+        ((g6 * 255 + 31) / 63) as u8,
+        ((b5 * 255 + 15) / 31) as u8,
+    ]
+}
+
+fn decode_height(value: u16) -> f32 {
+    (f32::from(value) - 32768.0) / 10.0
+}
+
+fn sample_height(height: &[f32], span: usize, x: isize, y: isize) -> f32 {
+    if span == 0 {
+        return 0.0;
+    }
+    let cx = x.clamp(0, span as isize - 1) as usize;
+    let cy = y.clamp(0, span as isize - 1) as usize;
+    height[cy * span + cx]
+}
+
+/// Renders one baked tile to an RGBA buffer at the colour raster's resolution.
+///
+/// Row 0 of the baked raster is the tile's south edge, but image rows run top
+/// down, so rows are emitted in reverse to put north at the top.
+pub fn render_tile_rgba(
+    surface: &[u8],
+    span: usize,
+    color: &[u16],
+    color_span: usize,
+    height: &[f32],
+    height_span: usize,
+) -> Vec<u8> {
+    let mut rgba = vec![0_u8; span * span * 4];
+    let shade_available = height_span > 1 && height.len() == height_span * height_span;
+    let tint_available = color_span > 0 && color.len() == color_span * color_span;
+
+    for row in 0..span {
+        for column in 0..span {
+            let class = usize::from(surface[row * span + column]).min(SURFACE_PALETTE.len() - 1);
+            let base = SURFACE_PALETTE[class];
+
+            // The sampled colour is a tint over the material, and sits near
+            // white for most terrain, so apply it as a multiplier rather than
+            // as the colour itself.
+            let [mut r, mut g, mut b] = if tint_available {
+                let tx = column * color_span / span;
+                let ty = row * color_span / span;
+                let [tr, tg, tb] = rgb565_to_rgb888(color[ty * color_span + tx]);
+                [
+                    (base[0] * f32::from(tr) / 255.0) as u8,
+                    (base[1] * f32::from(tg) / 255.0) as u8,
+                    (base[2] * f32::from(tb) / 255.0) as u8,
+                ]
+            } else {
+                [base[0] as u8, base[1] as u8, base[2] as u8]
+            };
+
+            if shade_available {
+                // Map the sample onto the coarser height raster.
+                let hx = (column * height_span / span) as isize;
+                let hy = (row * height_span / span) as isize;
+
+                // Anything below the waterline is drawn as water, deepening
+                // with distance below it, and is left unshaded because a water
+                // surface is flat regardless of the bed beneath it.
+                let depth = WATER_LEVEL - sample_height(height, height_span, hx, hy);
+                if depth > 0.0 {
+                    let t = (depth / WATER_OPAQUE_DEPTH).clamp(0.0, 1.0);
+                    let opacity = 0.55 + 0.45 * t;
+                    for (index, channel) in [&mut r, &mut g, &mut b].into_iter().enumerate() {
+                        let water = WATER_SHALLOW[index]
+                            + (WATER_DEEP[index] - WATER_SHALLOW[index]) * t;
+                        let blended =
+                            f32::from(*channel) * (1.0 - opacity) + water * opacity;
+                        *channel = blended.clamp(0.0, 255.0) as u8;
+                    }
+                    let flipped = span - 1 - row;
+                    let offset = (flipped * span + column) * 4;
+                    rgba[offset] = r;
+                    rgba[offset + 1] = g;
+                    rgba[offset + 2] = b;
+                    rgba[offset + 3] = 255;
+                    continue;
+                }
+
+                let dzdx = sample_height(height, height_span, hx + 1, hy)
+                    - sample_height(height, height_span, hx - 1, hy);
+                let dzdy = sample_height(height, height_span, hx, hy + 1)
+                    - sample_height(height, height_span, hx, hy - 1);
+                // Light from the north-west, matching how the reference maps read.
+                let slope = (-dzdx + dzdy) / (2.0 * HILLSHADE_SCALE);
+                let factor = 1.0 + slope.clamp(-1.0, 1.0) * HILLSHADE_STRENGTH;
+                r = (f32::from(r) * factor).clamp(0.0, 255.0) as u8;
+                g = (f32::from(g) * factor).clamp(0.0, 255.0) as u8;
+                b = (f32::from(b) * factor).clamp(0.0, 255.0) as u8;
+            }
+
+            let flipped = span - 1 - row;
+            let offset = (flipped * span + column) * 4;
+            rgba[offset] = r;
+            rgba[offset + 1] = g;
+            rgba[offset + 2] = b;
+            rgba[offset + 3] = 255;
+        }
+    }
+
+    rgba
+}
+
+fn encode_png(rgba: &[u8], span: usize) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, span as u32, span as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| format!("png header: {error}"))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|error| format!("png data: {error}"))?;
+    }
+    Ok(out)
+}
+
+fn convert_one(bytes: &[u8]) -> Result<(String, Vec<u8>, u32), String> {
+    let tile: BakedTileFile =
+        serde_json::from_slice(bytes).map_err(|error| format!("parse: {error}"))?;
+
+    if tile.material_span == 0 || tile.material_span > MAX_SPAN {
+        return Err(format!("implausible material span {}", tile.material_span));
+    }
+    if tile.color_span > MAX_SPAN || tile.height_span > MAX_SPAN {
+        return Err("implausible tint or height span".to_owned());
+    }
+
+    let surface = decode_surface(&tile.material, tile.material_span * tile.material_span)
+        .map_err(|error| format!("material raster: {error}"))?;
+    let color = decode_hex_u16(&tile.color, tile.color_span * tile.color_span)
+        .map_err(|error| format!("colour raster: {error}"))?;
+    let height = if tile.height.is_empty() || tile.height_span == 0 {
+        Vec::new()
+    } else {
+        decode_hex_u16(&tile.height, tile.height_span * tile.height_span)
+            .map_err(|error| format!("height raster: {error}"))?
+            .into_iter()
+            .map(decode_height)
+            .collect()
+    };
+
+    let rgba = render_tile_rgba(
+        &surface,
+        tile.material_span,
+        &color,
+        tile.color_span,
+        &height,
+        tile.height_span,
+    );
+    let png = encode_png(&rgba, tile.material_span)?;
+    Ok((tile.uuid, png, tile.size))
+}
+
+pub fn atlas_root() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("ScrapMap").join("atlas"))
+}
+
+/// Rewrites the manifest so every generated tile is the preferred image.
+///
+/// Existing entries keep their identity and simply gain a `topDownRelativePath`;
+/// tiles the manifest has never seen are appended, which is what makes the new
+/// start-area and quest tiles renderable at all.
+/// `generated` maps tile UUID to its cell size, or `None` when the PNG was
+/// already current and the size was therefore never read.
+fn merge_manifest(root: &Path, generated: &BTreeMap<String, Option<u32>>) -> Result<(), String> {
+    let manifest_path = root.join("manifest.json");
+    let mut manifest: Value = match fs::read(&manifest_path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|error| format!("manifest parse: {error}"))?,
+        Err(_) => json!({ "kind": "scrapmap.tile-atlas", "entries": [] }),
+    };
+
+    let entries = manifest
+        .get_mut("entries")
+        .and_then(Value::as_array_mut)
+        .ok_or("manifest has no entries array")?;
+
+    let mut seen = BTreeMap::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if let Some(uuid) = entry.get("tileUuid").and_then(Value::as_str) {
+            seen.insert(uuid.to_ascii_lowercase(), index);
+        }
+    }
+
+    for (uuid, size) in generated {
+        let key = uuid.to_ascii_lowercase();
+        let relative = format!("{GENERATED_DIRECTORY}/{key}.png");
+        match seen.get(&key) {
+            Some(&index) => {
+                let entry = &mut entries[index];
+                entry["topDownRelativePath"] = json!(relative);
+                entry["topDownSourceKind"] = json!("generated");
+                if let Some(size) = size {
+                    entry["tileSize"] = json!(size);
+                }
+                // Generated tiles render the crash site, warehouses and other
+                // landmarks as they are in this build. The imported sm_overview
+                // POI photos are years out of date and sat on top of them at a
+                // hand-tuned offset, so drop them once we have real terrain.
+                if let Some(object) = entry.as_object_mut() {
+                    for key in [
+                        "poiOverlayRelativePath",
+                        "poiOverlayOffsetX",
+                        "poiOverlayOffsetY",
+                        "poiOverlayTileSize",
+                    ] {
+                        object.remove(key);
+                    }
+                }
+            }
+            None => entries.push(json!({
+                "tileUuid": key,
+                "relativePath": relative,
+                "topDownRelativePath": relative,
+                "topDownSourceKind": "generated",
+                "tileSize": size.unwrap_or(1),
+            })),
+        }
+    }
+
+    manifest["generatedTiles"] = json!(generated.len());
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).map_err(|error| format!("serialise: {error}"))?,
+    )
+    .map_err(|error| format!("write manifest: {error}"))
+}
+
+/// Converts every baked tile under `<gameRoot>/Survival/ScrapMapAtlas`.
+///
+/// Conversion is incremental: a tile whose PNG is already newer than its baked
+/// JSON is left alone, so this is cheap to call on every startup.
+pub fn convert_baked_atlas(game_root: &Path, root: &Path) -> Result<AtlasBakeReportV1, String> {
+    let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+    let output_dir = root.join("tiles").join(GENERATED_DIRECTORY);
+    fs::create_dir_all(&output_dir).map_err(|error| format!("create output: {error}"))?;
+
+    let listing = match fs::read_dir(&baked_dir) {
+        Ok(listing) => listing,
+        Err(_) => {
+            return Ok(AtlasBakeReportV1 {
+                converted: 0,
+                skipped: 0,
+                failed: 0,
+                total_baked: 0,
+            })
+        }
+    };
+
+    let mut report = AtlasBakeReportV1 {
+        converted: 0,
+        skipped: 0,
+        failed: 0,
+        total_baked: 0,
+    };
+    let mut generated = BTreeMap::new();
+
+    for entry in listing.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() > MAX_BAKED_TILE_BYTES {
+            continue;
+        }
+        report.total_baked += 1;
+
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let target = output_dir.join(format!("{stem}.png"));
+
+        // Skip work whose output is already current.
+        let baked_time = metadata.modified().ok();
+        let target_time = fs::metadata(&target).ok().and_then(|m| m.modified().ok());
+        if let (Some(baked), Some(existing)) = (baked_time, target_time) {
+            if existing >= baked {
+                report.skipped += 1;
+                generated.insert(stem, None);
+                continue;
+            }
+        }
+
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                report.failed += 1;
+                continue;
+            }
+        };
+        match convert_one(&bytes) {
+            Ok((uuid, png, size)) => {
+                let key = uuid.to_ascii_lowercase();
+                let target = output_dir.join(format!("{key}.png"));
+                if fs::write(&target, png).is_ok() {
+                    generated.insert(key, Some(size));
+                    report.converted += 1;
+                } else {
+                    report.failed += 1;
+                }
+            }
+            Err(_) => report.failed += 1,
+        }
+    }
+
+    if !generated.is_empty() {
+        merge_manifest(root, &generated)?;
+    }
+
+    Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex_u16(values: &[u16]) -> String {
+        values.iter().map(|value| format!("{value:04X}")).collect()
+    }
+
+    #[test]
+    fn decodes_fixed_width_hex_rasters() {
+        assert_eq!(
+            decode_hex_u16("0000FFFF8000", 3).unwrap(),
+            vec![0x0000, 0xFFFF, 0x8000]
+        );
+        assert!(decode_hex_u16("0000", 2).is_err());
+        assert!(decode_hex_u16("00ZZ", 1).is_err());
+    }
+
+    #[test]
+    fn rgb565_endpoints_map_to_full_scale() {
+        assert_eq!(rgb565_to_rgb888(0x0000), [0, 0, 0]);
+        assert_eq!(rgb565_to_rgb888(0xFFFF), [255, 255, 255]);
+    }
+
+    #[test]
+    fn height_encoding_round_trips_through_the_lua_bias() {
+        // The Lua side writes round(h * 10) + 32768.
+        for metres in [-40.0_f32, -0.5, 0.0, 12.3, 250.0] {
+            let encoded = (metres * 10.0).round() as i32 + 32768;
+            let decoded = decode_height(encoded as u16);
+            assert!((decoded - metres).abs() < 0.05, "{metres} -> {decoded}");
+        }
+    }
+
+    #[test]
+    fn rendering_flips_rows_so_north_is_up() {
+        // Two rows: south row grass, north row sand.
+        let surface = vec![0_u8, 0, 1, 1];
+        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        // Image row 0 must be the north (sand) row.
+        let sand = SURFACE_PALETTE[1];
+        let grass = SURFACE_PALETTE[0];
+        assert_eq!(rgba[0], sand[0] as u8);
+        assert_eq!(rgba[8], grass[0] as u8);
+    }
+
+    #[test]
+    fn surface_classes_pick_distinct_colours() {
+        let surface = vec![0_u8, 1, 2, 3];
+        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        let pixels: Vec<[u8; 3]> = (0..4)
+            .map(|i| [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]])
+            .collect();
+        for (a, b) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)] {
+            assert_ne!(pixels[a], pixels[b], "class {a} and {b} must differ");
+        }
+    }
+
+    #[test]
+    fn the_tint_modulates_the_surface_rather_than_replacing_it() {
+        let surface = vec![0_u8; 4];
+        // A white tint should leave the palette colour essentially untouched.
+        let white = render_tile_rgba(&surface, 2, &[0xFFFF; 4], 2, &[], 0);
+        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        assert_eq!(white[0], plain[0]);
+        // A black tint darkens it towards zero.
+        let black = render_tile_rgba(&surface, 2, &[0x0000; 4], 2, &[], 0);
+        assert_eq!(black[0], 0);
+    }
+
+    #[test]
+    fn terrain_below_the_waterline_reads_as_water() {
+        let surface = vec![0_u8; 4]; // grass lakebed, as the crash-site tile has
+        let dry = render_tile_rgba(&surface, 2, &[], 0, &vec![0.0_f32; 4], 2);
+        let shallow = render_tile_rgba(&surface, 2, &[], 0, &vec![-2.0_f32; 4], 2);
+        let deep = render_tile_rgba(&surface, 2, &[], 0, &vec![-30.0_f32; 4], 2);
+
+        let blueness = |px: &[u8]| i32::from(px[2]) - i32::from(px[1]);
+        assert!(
+            blueness(&shallow) > blueness(&dry),
+            "submerged ground should turn blue, not stay grass"
+        );
+        assert!(
+            blueness(&deep) > blueness(&shallow),
+            "deeper water should read darker and bluer"
+        );
+        // A few centimetres of sampling noise must not flood ordinary terrain.
+        let noise = render_tile_rgba(&surface, 2, &[], 0, &vec![-0.4_f32; 4], 2);
+        assert_eq!(noise, dry, "sub-threshold dips must not become water");
+    }
+
+    #[test]
+    fn flat_terrain_is_left_unshaded() {
+        let surface = vec![0_u8; 4];
+        let flat = vec![10.0_f32; 4];
+        let shaded = render_tile_rgba(&surface, 2, &[], 0, &flat, 2);
+        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        assert_eq!(shaded, plain, "flat ground must not pick up relief");
+    }
+
+    /// Brightness of the tile centre, away from the clamped border samples.
+    fn centre_brightness(height: &[f32], span: usize) -> u8 {
+        let surface = vec![0_u8; span * span];
+        let rgba = render_tile_rgba(&surface, span, &[], 0, height, span);
+        rgba[((span / 2) * span + span / 2) * 4]
+    }
+
+    #[test]
+    fn opposing_slopes_shade_in_opposite_directions() {
+        let span = 4;
+        let flat = vec![0.0_f32; span * span];
+        let mut rising = vec![0.0_f32; span * span];
+        let mut falling = vec![0.0_f32; span * span];
+        for y in 0..span {
+            for x in 0..span {
+                rising[y * span + x] = x as f32 * 4.0;
+                falling[y * span + x] = (span - 1 - x) as f32 * 4.0;
+            }
+        }
+
+        let flat_value = centre_brightness(&flat, span);
+        let rising_value = centre_brightness(&rising, span);
+        let falling_value = centre_brightness(&falling, span);
+
+        // Light comes from the north-west, so a slope rising eastward faces away
+        // from it and a slope rising westward faces into it.
+        assert!(
+            rising_value < flat_value,
+            "east-facing rise should darken: {rising_value} vs {flat_value}"
+        );
+        assert!(
+            falling_value > flat_value,
+            "west-facing rise should lighten: {falling_value} vs {flat_value}"
+        );
+    }
+
+    #[test]
+    fn convert_one_round_trips_a_synthetic_tile() {
+        let color = hex_u16(&[0xF800, 0x07E0, 0x001F, 0xFFFF]);
+        let height = hex_u16(&[32768, 32768, 32768, 32768]);
+        let document = json!({
+            "schemaVersion": 2,
+            "uuid": "AB-CD",
+            "size": 1,
+            "materialSpan": 2,
+            "colorSpan": 2,
+            "heightSpan": 2,
+            "material": "0123",
+            "color": color,
+            "height": height,
+        });
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(uuid, "AB-CD");
+        assert_eq!(size, 1);
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "not a PNG");
+    }
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or_default();
+        let path = env::temp_dir().join(format!("scrapmap-atlas-{label}-{stamp}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// Builds a tile shaped exactly like the Lua baker's output: a colour raster
+    /// at `size * colour_res` per edge and a coarser height raster.
+    fn baked_tile(uuid: &str, size: usize, material_res: usize, coarse_res: usize) -> Value {
+        let material_span = size * material_res;
+        let coarse_span = size * coarse_res;
+        let material: String = (0..material_span * material_span)
+            .map(|index| char::from_digit((index % 4) as u32, 16).unwrap())
+            .collect();
+        let color: Vec<u16> = vec![0xFFFF; coarse_span * coarse_span];
+        let height: Vec<u16> = vec![32768_u16; coarse_span * coarse_span];
+        // Lua writes every number as a double; mirror that here.
+        json!({
+            "schemaVersion": 2,
+            "uuid": uuid,
+            "size": size as f64,
+            "cellSize": 64.0,
+            "materialSpan": material_span as f64,
+            "colorSpan": coarse_span as f64,
+            "heightSpan": coarse_span as f64,
+            "materialEncoding": "surface-class-hex",
+            "encoding": "rgb565-hex",
+            "material": material,
+            "color": hex_u16(&color),
+            "height": hex_u16(&height),
+        })
+    }
+
+    #[test]
+    fn baked_tiles_become_pngs_and_are_published_through_the_manifest() {
+        let game_root = scratch_dir("game");
+        let atlas_root = scratch_dir("atlas");
+        let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+        fs::create_dir_all(&baked_dir).unwrap();
+
+        // A 1x1 tile and a 2x2 tile, at the resolutions the Lua baker uses.
+        for (uuid, size) in [("aaaa-1111", 1_usize), ("bbbb-2222", 2)] {
+            fs::write(
+                baked_dir.join(format!("{uuid}.json")),
+                serde_json::to_vec(&baked_tile(uuid, size, 64, 32)).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let report = convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        assert_eq!(report.converted, 2, "both tiles should convert");
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.total_baked, 2);
+
+        let generated = atlas_root.join("tiles").join(GENERATED_DIRECTORY);
+        for (uuid, size) in [("aaaa-1111", 1_u32), ("bbbb-2222", 2)] {
+            let png = generated.join(format!("{uuid}.png"));
+            let bytes = fs::read(&png).unwrap_or_else(|_| panic!("missing {uuid}.png"));
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+            // PNG stores width in bytes 16..20, big endian.
+            let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+            assert_eq!(width, size * 64, "{uuid} should be size*64 px wide");
+        }
+
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(atlas_root.join("manifest.json")).unwrap()).unwrap();
+        let entries = manifest["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2, "unknown tiles must be appended");
+        for entry in entries {
+            // The renderer gates purely on this field, so it is what makes the
+            // generated tiles visible.
+            assert!(entry["topDownRelativePath"]
+                .as_str()
+                .unwrap()
+                .starts_with("generated/"));
+            assert_eq!(entry["topDownSourceKind"], "generated");
+        }
+
+        // A second pass must be a no-op rather than redoing the work.
+        let again = convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        assert_eq!(again.converted, 0);
+        assert_eq!(again.skipped, 2);
+
+        fs::remove_dir_all(&game_root).ok();
+        fs::remove_dir_all(&atlas_root).ok();
+    }
+
+    #[test]
+    fn existing_manifest_entries_keep_their_identity() {
+        let game_root = scratch_dir("game-merge");
+        let atlas_root = scratch_dir("atlas-merge");
+        let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+        fs::create_dir_all(&baked_dir).unwrap();
+        fs::write(
+            baked_dir.join("cccc-3333.json"),
+            serde_json::to_vec(&baked_tile("cccc-3333", 1, 8, 4)).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            atlas_root.join("manifest.json"),
+            serde_json::to_vec(&json!({
+                "kind": "scrapmap.tile-atlas",
+                "entries": [{
+                    "tileUuid": "cccc-3333",
+                    "relativePath": "meadow/cccc-3333.png",
+                    "sha256": "keep-me",
+                    "poiOverlayRelativePath": "topdown/poi/crashed_ship.jpg",
+                    "poiOverlayOffsetX": -2,
+                    "poiOverlayOffsetY": -2,
+                    "poiOverlayTileSize": 4
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        convert_baked_atlas(&game_root, &atlas_root).unwrap();
+
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(atlas_root.join("manifest.json")).unwrap()).unwrap();
+        let entries = manifest["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "the tile must be updated, not duplicated");
+        assert_eq!(entries[0]["sha256"], "keep-me");
+        assert_eq!(entries[0]["relativePath"], "meadow/cccc-3333.png");
+        assert_eq!(
+            entries[0]["topDownRelativePath"], "generated/cccc-3333.png",
+            "the generated image should take over rendering"
+        );
+        // The stale sm_overview POI photo must not stay layered on top.
+        for key in [
+            "poiOverlayRelativePath",
+            "poiOverlayOffsetX",
+            "poiOverlayOffsetY",
+            "poiOverlayTileSize",
+        ] {
+            assert!(
+                entries[0].get(key).is_none(),
+                "{key} should be dropped for generated tiles"
+            );
+        }
+
+        fs::remove_dir_all(&game_root).ok();
+        fs::remove_dir_all(&atlas_root).ok();
+    }
+
+    #[test]
+    fn lua_float_counts_are_accepted() {
+        // This is exactly what sm.json.save writes: every number is a double.
+        let document = json!({
+            "uuid": "float-tile",
+            "size": 2.0,
+            "materialSpan": 2.0,
+            "colorSpan": 2.0,
+            "heightSpan": 0.0,
+            "material": "0123",
+            "color": hex_u16(&[0xF800, 0x07E0, 0x001F, 0xFFFF]),
+            "height": "",
+        });
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap())
+            .expect("float-valued counts must parse");
+        assert_eq!(uuid, "float-tile");
+        assert_eq!(size, 2);
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+
+    #[test]
+    fn convert_one_rejects_a_truncated_raster() {
+        let document = json!({
+            "uuid": "x",
+            "materialSpan": 4,
+            "colorSpan": 0,
+            "heightSpan": 0,
+            "material": "01",
+            "color": "",
+            "height": "",
+        });
+        assert!(convert_one(&serde_json::to_vec(&document).unwrap()).is_err());
+    }
+}

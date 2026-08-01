@@ -1,0 +1,2 @@
+pid=52328 module=7FF7CD590000 watched=2274DC6A740
+ERROR debugProcess
