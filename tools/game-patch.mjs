@@ -108,6 +108,9 @@ function gameRoot() {
   return found;
 }
 
+/** Collapses CRLF and lone CR to LF so installed files are byte-stable. */
+const normaliseEndings = (text) => text.replace(/\r\n?/g, "\n");
+
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function hashFile(path) {
@@ -186,7 +189,10 @@ function commandApply(root) {
     }
     const target = join(root, relative);
     mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(source, target);
+    // Install with normalised line endings rather than copying byte-for-byte.
+    // A checkout on a machine with core.autocrlf can rewrite these files, and
+    // the host/client checksum comparison fails on a single changed byte.
+    writeFileSync(target, normaliseEndings(readFileSync(source, "utf8")));
     console.log(`addon     ${relative}`);
   }
 

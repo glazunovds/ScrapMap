@@ -1,0 +1,17 @@
+# Normalise text in the repository.
+* text=auto
+
+# Scrap Mechanic compares Lua script checksums between host and client, so the
+# patch files must be byte-identical on every machine. Pin them to LF in both
+# the repository and the working tree; a platform-specific checkout would
+# otherwise change the bytes and break multiplayer.
+*.lua text eol=lf
+game-patch/** text eol=lf
+
+# Binary payloads git must never translate.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.CT binary
