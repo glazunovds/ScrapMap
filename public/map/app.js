@@ -537,7 +537,12 @@
     // A tile image covers the whole tile, which may span several cells. Take
     // only this cell's slice, or a 4x4 tile would be drawn complete in each of
     // its sixteen cells.
-    const size = Math.max(1, Math.round(Number(cell.tileSize) || 1));
+    // Prefer the atlas entry: the persisted layout drops tileSize, so relying
+    // on the cell alone would break after a restart that reloads from storage.
+    const size = Math.max(
+      1,
+      Math.round(Number(entry.tileSize) || Number(cell.tileSize) || 1)
+    );
     const sliceWidth = width / size;
     const sliceHeight = height / size;
     const offsetX = Math.min(size - 1, Math.max(0, Math.round(Number(cell.xOffset) || 0)));

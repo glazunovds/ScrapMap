@@ -33,13 +33,21 @@ const HILLSHADE_STRENGTH: f32 = 0.28;
 const HILLSHADE_SCALE: f32 = 6.0;
 
 /// Depth at which terrain reads as water. Ordinary tiles only graze a few
-/// centimetres below zero at their edges, while real lakes cut metres down, so
-/// a small negative threshold separates water from sampling noise.
-const WATER_LEVEL: f32 = -1.0;
+/// centimetres below zero at their edges, while lake beds cut well past this.
+/// The burnt crash trench bottoms out around -3 m, so the threshold sits below
+/// it; the material gate below rejects whatever else comes close.
+const WATER_LEVEL: f32 = -2.5;
 /// Metres below the waterline at which the water is fully opaque.
 const WATER_OPAQUE_DEPTH: f32 = 6.0;
 const WATER_SHALLOW: [f32; 3] = [104.0, 170.0, 198.0];
 const WATER_DEEP: [f32; 3] = [38.0, 86.0, 140.0];
+
+/// Depth alone mistakes gouges for rivers: the crash-site trench and sunken
+/// roads cut several metres down but are dirt, while lake beds sample as rock
+/// or sand. Requiring a lakebed material keeps trenches dry.
+fn holds_water(surface_class: u8) -> bool {
+    surface_class == 1 || surface_class == 3 // sand or rock
+}
 
 /// Lua has one numeric type, so `sm.json.save` writes every count as a float
 /// (`512.0`). Serde will not coerce that into an integer, so read it as a
@@ -217,7 +225,7 @@ pub fn render_tile_rgba(
                 // with distance below it, and is left unshaded because a water
                 // surface is flat regardless of the bed beneath it.
                 let depth = WATER_LEVEL - sample_height(height, height_span, hx, hy);
-                if depth > 0.0 {
+                if depth > 0.0 && holds_water(surface[row * span + column]) {
                     let t = (depth / WATER_OPAQUE_DEPTH).clamp(0.0, 1.0);
                     let opacity = 0.55 + 0.45 * t;
                     for (index, channel) in [&mut r, &mut g, &mut b].into_iter().enumerate() {
@@ -551,23 +559,40 @@ mod tests {
 
     #[test]
     fn terrain_below_the_waterline_reads_as_water() {
-        let surface = vec![0_u8; 4]; // grass lakebed, as the crash-site tile has
-        let dry = render_tile_rgba(&surface, 2, &[], 0, &vec![0.0_f32; 4], 2);
-        let shallow = render_tile_rgba(&surface, 2, &[], 0, &vec![-2.0_f32; 4], 2);
-        let deep = render_tile_rgba(&surface, 2, &[], 0, &vec![-30.0_f32; 4], 2);
+        let bed = vec![3_u8; 4]; // rock, as real lake beds sample
+        let dry = render_tile_rgba(&bed, 2, &[], 0, &vec![0.0_f32; 4], 2);
+        let shallow = render_tile_rgba(&bed, 2, &[], 0, &vec![-4.0_f32; 4], 2);
+        let deep = render_tile_rgba(&bed, 2, &[], 0, &vec![-30.0_f32; 4], 2);
 
         let blueness = |px: &[u8]| i32::from(px[2]) - i32::from(px[1]);
         assert!(
             blueness(&shallow) > blueness(&dry),
-            "submerged ground should turn blue, not stay grass"
+            "a submerged lake bed should turn blue"
         );
         assert!(
             blueness(&deep) > blueness(&shallow),
             "deeper water should read darker and bluer"
         );
         // A few centimetres of sampling noise must not flood ordinary terrain.
-        let noise = render_tile_rgba(&surface, 2, &[], 0, &vec![-0.4_f32; 4], 2);
+        let noise = render_tile_rgba(&bed, 2, &[], 0, &vec![-0.4_f32; 4], 2);
         assert_eq!(noise, dry, "sub-threshold dips must not become water");
+    }
+
+    #[test]
+    fn dirt_gouges_do_not_become_rivers() {
+        // The crash-site trench cuts several metres down but is dirt, not a
+        // lake bed. Rendering it as water made it read as a river.
+        let trench = vec![2_u8; 4]; // dirt
+        let dry = render_tile_rgba(&trench, 2, &[], 0, &vec![0.0_f32; 4], 2);
+        let cut = render_tile_rgba(&trench, 2, &[], 0, &vec![-4.0_f32; 4], 2);
+        assert_eq!(cut, dry, "a dirt gouge must stay dry regardless of depth");
+
+        // Grass hollows likewise.
+        let hollow = vec![0_u8; 4];
+        assert_eq!(
+            render_tile_rgba(&hollow, 2, &[], 0, &vec![-4.0_f32; 4], 2),
+            render_tile_rgba(&hollow, 2, &[], 0, &vec![0.0_f32; 4], 2),
+        );
     }
 
     #[test]

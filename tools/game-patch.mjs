@@ -23,7 +23,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,16 +74,38 @@ const INJECTIONS = [
 
 const MANAGED = [...ADDON_FILES, ...INJECTIONS.map((entry) => entry.file)];
 
-function gameRoot() {
-  const fromArgs = process.argv.find((value) => value.startsWith("--game="));
-  const root = fromArgs
-    ? fromArgs.slice("--game=".length)
-    : process.env.SCRAPMAP_GAME_ROOT ||
-      "D:/SteamLibrary/steamapps/common/Scrap Mechanic";
-  if (!existsSync(join(root, "Survival", "Scripts"))) {
-    throw new Error(`Not a Scrap Mechanic install: ${root}`);
+const GAME_DIRECTORY = join("steamapps", "common", "Scrap Mechanic");
+
+const isGameRoot = (root) => existsSync(join(root, "Survival", "Scripts"));
+
+/** Looks for the install in the usual Steam library layouts on every drive. */
+function discoverGameRoot() {
+  const libraries = ["SteamLibrary", join("Program Files (x86)", "Steam"), "Steam"];
+  for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
+    for (const library of libraries) {
+      const candidate = join(`${letter}:${sep}`, library, GAME_DIRECTORY);
+      if (isGameRoot(candidate)) return candidate;
+    }
   }
-  return root;
+  return null;
+}
+
+function gameRoot() {
+  const flag = process.argv.find((value) => value.startsWith("--game="));
+  const explicit = flag ? flag.slice("--game=".length) : process.env.SCRAPMAP_GAME_ROOT;
+  if (explicit) {
+    if (!isGameRoot(explicit)) {
+      throw new Error(`Not a Scrap Mechanic install: ${explicit}`);
+    }
+    return explicit;
+  }
+  const found = discoverGameRoot();
+  if (!found) {
+    throw new Error(
+      "Could not find Scrap Mechanic. Pass --game=<path> or set SCRAPMAP_GAME_ROOT.",
+    );
+  }
+  return found;
 }
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
