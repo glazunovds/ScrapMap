@@ -85,6 +85,13 @@ sea level and never pulled the camera back for a single tower — while reportin
 nothing worse than a probe "miss". Prefer measuring from baked atlas data over
 casting rays at all; see `docs/HANDOFF.md`.
 
+**The game's renderer runs out of culling groups during a long session.**
+`ERROR: RenderScene.cpp:183 Oh no! we are out of culling groups!!!` appears
+hundreds of thousands of times in a log after an hour, and once it starts the
+scene stops drawing: a window capture then returns one flat colour, which the
+POI sweep rejects as `detail 0.0`. It is not a framing fault and no retry helps.
+Restart the game before sweeping, and keep sweeps short.
+
 **`sm.render.setCinematic( true )` draws letterbox bars.** It cost the top and
 bottom tenth of all 116 POI photographs. `sm.gui.hideGui` is what hides the HUD.
 
