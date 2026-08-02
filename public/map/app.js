@@ -1,6 +1,21 @@
 (function startScrapMechanicMap() {
   "use strict";
 
+  /**
+   * Interface string by key.
+   *
+   * Falls back to the supplied literal, then to the key, so a dictionary that
+   * has not loaded yet degrades to readable text rather than throwing. It threw
+   * once: the definition was anchored on an anonymous IIFE header this file
+   * does not have, so every call site here was a ReferenceError, which aborted
+   * applyLayout before it announced the world and left the profile unresolved.
+   */
+  const text = (key, fallback) => window.SMText?.t(key, fallback) ?? fallback ?? key;
+
+  /** A point-of-interest category name in the active language. */
+  const categoryLabel = (definition) =>
+    definition?.labelKey ? text(definition.labelKey, definition.label) : definition?.label || "";
+
   const Core = window.SMMapCore;
   if (!Core) {
     throw new Error("map-core.js не загружен.");
