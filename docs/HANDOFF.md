@@ -285,6 +285,28 @@ of the photograph that reads as water against the fraction of the tile that is
 below the waterline in the baked height raster — a farming patch photographing as
 60% water is not a close call. The data for both sides already exists.
 
+## Where the photography actually ended: 112 of 116
+
+Reviewed tile by tile through a contact sheet. The four that never made it fail
+the same way every time -- `detail 0.0-0.2`, a uniform frame -- and survived a
+fresh game session, three capture retries inside the pose, and a settle raised
+from 2.5 s to 4 s:
+
+| Tile | |
+|---|---|
+| `139ff089` | POI_FOREST_CAMP |
+| `465b42d9` | POI_DESERT_OILPOOL |
+| `c3bda64c` | POI_BURNTFOREST_RUIN |
+| `d5532a26` | POI_FIELD_BUILDERQUEST_CORNHEART |
+
+**The culling-group theory is dead.** A session logging zero
+`out of culling groups` errors reproduced the failures exactly, so the renderer
+exhaustion -- real, and hundreds of thousands of lines of it -- is a coincidence.
+
+Their photographs are deleted rather than left broken, so those four render from
+the generated atlas. That is the right outcome: a clean schematic tile beats a
+blank one, and nobody looking at the map can tell.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** They are photographed turned and

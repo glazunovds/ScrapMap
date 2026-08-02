@@ -85,12 +85,14 @@ sea level and never pulled the camera back for a single tower — while reportin
 nothing worse than a probe "miss". Prefer measuring from baked atlas data over
 casting rays at all; see `docs/HANDOFF.md`.
 
-**The game's renderer runs out of culling groups during a long session.**
-`ERROR: RenderScene.cpp:183 Oh no! we are out of culling groups!!!` appears
-hundreds of thousands of times in a log after an hour, and once it starts the
-scene stops drawing: a window capture then returns one flat colour, which the
-POI sweep rejects as `detail 0.0`. It is not a framing fault and no retry helps.
-Restart the game before sweeping, and keep sweeps short.
+**A handful of tiles always capture as one flat colour, and nothing yet
+explains it.** Four of 116 reject as `detail 0.0-0.2` on every attempt, across
+fresh sessions, three capture retries and a doubled settle. The obvious suspect
+was the renderer: `RenderScene.cpp:183 Oh no! we are out of culling groups!!!`
+appears up to 670,000 times in a long session. It is not the cause -- a session
+with **zero** culling errors reproduced the same failures. Do not spend the
+theory again without new evidence. Those tiles fall back to their generated
+image, which is a perfectly good outcome.
 
 **`sm.render.setCinematic( true )` draws letterbox bars.** It cost the top and
 bottom tenth of all 116 POI photographs. `sm.gui.hideGui` is what hides the HUD.
