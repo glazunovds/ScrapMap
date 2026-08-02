@@ -1,39 +1,23 @@
-# Cloudflare sync — направление v1
+# Shared fog and markers
 
-Cloudflare не рендерит карту и не хранит game assets. Один Worker маршрутизирует
-запросы в SQLite-backed Durable Object, выбранный по opaque room id. Такой
-object сериализует изменения общего тумана и меток и переживает eviction или
-redeploy без отдельного VPS-процесса.
+**Status: not started.** This is the intended design, not a description of
+running code. `src/sync/` contains an interface declaration and nothing else,
+and there is no Worker in the repository.
 
-```text
-ScrapMap A ─┐
-            ├─ HTTPS Worker ─ Durable Object(room) ─ SQLite storage
-ScrapMap B ─┘
-```
+## Shape
 
-Для PoC не нужны D1, KV, R2, WebSocket и отдельный backend. Всё состояние одной
-группы живёт в одном Durable Object; следующая группа получает другой object.
+Cloudflare renders nothing and stores no game assets. One Worker routes requests
+into a SQLite-backed Durable Object selected by an opaque room id. That object
+serialises changes to shared fog and markers and survives eviction or redeploy
+without a VPS process to babysit.
 
-## Нагрузка
-
-Клиент отправляет fog delta пакетами раз в несколько секунд и marker mutation
-сразу. Snapshot загружается при подключении, затем клиент запрашивает изменения
-по revision cursor с умеренным интервалом. Два постоянно активных клиента не
-должны делать частый polling: 5 секунд достаточно для меток и тумана.
-
-Hibernation WebSocket оставляем опцией для будущего live presence. Для первого
-этапа HTTP проще, а координаты игроков не требуется сохранять на сервере.
-
-## Доступ
-
-У room есть случайный идентификатор и отдельный bearer token для каждого
-устройства. Токен хранится Tauri-клиентом, передаётся в `Authorization`, не
-помещается в query string и не выводится в diagnostic logs. Оба игрока имеют
-право добавлять и удалять общие метки.
+No D1, KV or R2 for the prototype, and no WebSockets. Hibernating WebSocket
+presence is explicitly deferred and must not block the first cooperative
+checkpoint — polling is sufficient for two players.
 
 ## API v1
 
-```http
+```
 GET    /healthz
 GET    /v1/rooms/{room}/snapshot
 GET    /v1/rooms/{room}/changes?after=<revision>
@@ -42,39 +26,50 @@ PUT    /v1/rooms/{room}/markers/{marker-id}
 DELETE /v1/rooms/{room}/markers/{marker-id}
 ```
 
-Каждая mutation содержит `Idempotency-Key`. Ответ mutation возвращает новую
-server revision.
+Every mutation carries an `Idempotency-Key`, and every response returns the new
+server revision. A client connects with a snapshot and then follows a revision
+cursor.
 
-### Fog
+Polling: fog deltas batched every few seconds, marker mutations sent
+immediately. Five seconds is enough for both.
 
-Клиент отправляет только новые cells вокруг собственного игрока. Fog является
-grow-only set: Durable Object выполняет monotonic union. Координаты игрока и
-breadcrumbs на Cloudflare не отправляются.
+## Fog
 
-### Markers
+A grow-only set, unioned monotonically in the Durable Object. Only cells around
+the local player are sent.
 
-- marker имеет стабильный UUID;
-- update/delete содержит ожидаемую version;
-- конфликт возвращает `409` и текущую запись;
-- delete создаёт tombstone;
-- server revision определяет порядок без доверия к часам клиента.
+**Player coordinates and breadcrumbs are never sent to Cloudflare.** Fog says
+where someone has been, which is the point; live position is nobody else's
+business and is not needed for the feature.
 
-## Клиент
+## Markers
 
-Локальная SQLite содержит outbox. Offline fog и marker mutations повторяются
-после reconnect, поэтому операции должны быть идемпотентными. Profile/world
-fingerprint остаётся локальным и сопоставляется с room только после явного join.
+Stable UUID per marker. Update and delete carry the expected version; a conflict
+returns `409` with the current record so the client can reconcile. Delete
+creates a tombstone. Server revision defines ordering — no client clocks, which
+avoids every clock-skew argument.
 
-## Границы PoC
+Both players may add and delete shared markers.
 
-- bounded JSON body и fog batch;
-- координаты проверяются по world bounds;
-- `Cache-Control: no-store` для приватного состояния;
-- неизвестный token получает одинаковый `401` без раскрытия room;
-- никакой панели администратора, OAuth, D1 или сложной ролевой модели;
-- проверка восстановления состояния после локального Miniflare eviction и
-  Cloudflare redeploy.
+## Access
 
-Live presence можно добавить отдельным ephemeral WebSocket после общей
-синхронизации fog/markers. Он не должен блокировать первый cooperative
-checkpoint.
+A random room id and one bearer token per device, sent in `Authorization` and
+never in a query string, never in a diagnostic log. An unknown token gets an
+identical `401` whether or not the room exists, so the endpoint cannot be used
+to probe for rooms.
+
+The world fingerprint and profile key stay local; a room is bound to them only
+after an explicit join.
+
+## Boundaries
+
+- Bounded JSON body and bounded fog batch.
+- Coordinates validated against world bounds.
+- `Cache-Control: no-store`.
+- No admin panel, no OAuth, no role model.
+- Must survive local Miniflare eviction and a Cloudflare redeploy.
+
+## Client side
+
+A local SQLite outbox, so offline work replays when the room is reachable again.
+Replay must be idempotent — that is what the `Idempotency-Key` is for.

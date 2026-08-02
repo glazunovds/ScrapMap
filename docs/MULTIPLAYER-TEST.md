@@ -1,80 +1,79 @@
-# Проверка мультиплеера — инструкция для второго игрока
+# Playing together — instructions for the second player
 
-Scrap Mechanic сверяет контрольные суммы Lua-скриптов при подключении: хост
-присылает свой список, клиент сравнивает его со своими файлами и отказывается
-войти при любом расхождении. Поэтому **оба игрока должны запускать одинаковые
-файлы, байт в байт**. Достаточно, чтобы один из вас не поставил патч (или
-поставил другую версию) — и вы получите окно `Invalid checksum`.
+Scrap Mechanic checks Lua script checksums when you join a server. The host
+sends its list, your client compares its own files, and any difference is
+refused with `Invalid checksum`. So **both players must run byte-identical
+files** — if one of you is unpatched, or on a different revision, neither of you
+gets in.
 
-Патч нужен только для живых позиций игроков. Сама карта работает и без него.
+The patch is only needed for live player positions. The map itself works without
+it.
 
-## Что нужно один раз
+## One-time setup
 
-1. Установить [Node.js](https://nodejs.org) (только для запуска скрипта патча).
+1. Install [Node.js](https://nodejs.org) — only to run the patch script.
 
-2. Забрать репозиторий:
+2. Clone the repository:
 
    ```bash
    git clone https://github.com/glazunovds/ScrapMap.git
    ```
 
-3. Восстановить чистые файлы игры: Steam → Scrap Mechanic → Свойства →
-   Установленные файлы → **Проверить целостность файлов игры**.
+3. Restore clean game files: Steam → Scrap Mechanic → Properties → Installed
+   Files → **Verify integrity of game files**.
 
-4. Записать эталон, с которого патч будет накатываться и откатываться:
+4. Record the baseline the patch applies to and reverts to:
 
    ```bash
    node tools/game-patch.mjs snapshot
    ```
 
-   Скрипт сам найдёт игру в стандартных папках Steam. Если не нашёл — добавьте
-   `--game="<путь к папке Scrap Mechanic>"`.
+   The script finds the game in the usual Steam library locations. If it does
+   not, add `--game="<path to the Scrap Mechanic folder>"`.
 
-## Перед совместной игрой
+## Before playing together
 
-Оба выполняете **из одной и той же версии репозитория** (`git pull`, затем
-`git log -1` — хеш коммита должен совпадать):
+Both of you, from the **same repository revision** — `git pull`, then check
+`git log -1` shows the same commit:
 
 ```bash
 node tools/game-patch.mjs apply
 ```
 
-Скрипт напечатает хеши файлов. **Сравните их между собой** — все пять строк
-должны совпасть. Если хоть одна отличается, подключиться не выйдет.
+The script prints a hash per file. **Compare them.** All five must match. If any
+differ you will not be able to connect.
 
-Если хеши не сходятся, почти наверняка дело в переводе строк: `git` на Windows
-по умолчанию (`core.autocrlf=true`) меняет LF на CRLF при клонировании, и файл
-перестаёт быть байт-идентичным. Сделайте `git pull` и запустите `apply` заново —
-скрипт нормализует переводы строк при установке, а `.gitattributes` фиксирует их
-в репозитории.
+If hashes disagree it is almost always line endings: git on Windows converts LF
+to CRLF on checkout by default, which changes the bytes. `git pull` and run
+`apply` again — the script normalises line endings on install, and
+`.gitattributes` pins them in the repository.
 
-Запускать игру нужно через Steam с параметром `-dev`, иначе игра не подхватит
-изменённые Lua-файлы. В свойствах игры → Параметры запуска:
+If the three addon files match but `SurvivalGame.lua` or `terrain_overworld.lua`
+differ, that is a different problem: those are rebuilt from each machine's own
+game files, so a mismatch means your game versions differ.
 
-```
--dev
-```
+Launch through Steam with `-dev` in the launch options — without it the game
+ignores the patched scripts entirely.
 
-## Чтобы играть с кем-то без патча
+## To play with someone unpatched
 
 ```bash
 node tools/game-patch.mjs revert
 ```
 
-Файлы игры возвращаются к оригиналу, и вы снова заходите на любой сервер.
-Карта, туман войны и метки продолжают работать — атлас тайлов уже сохранён
-локально и от патча не зависит.
+Game files return to stock and you can join anyone. The map, fog and markers
+keep working; the tile atlas is cached locally and does not depend on the patch.
 
-## Проверить состояние в любой момент
+## Checking state
 
 ```bash
 node tools/game-patch.mjs status
 ```
 
-## Что проверяем в тесте
+## What the test is for
 
-- заходит ли клиент на сервер хоста с одинаковым патчем;
-- видно ли обоих игроков на миникарте со своими именами;
-- правильно ли определяется мир/профиль на стороне гостя;
-- не остаются ли игроки на карте после выхода;
-- совпадает ли направление стрелки с фактическим направлением взгляда.
+- Can the client join the host with the same patch applied?
+- Are both players visible on the minimap with their names?
+- Does the guest identify the world and profile correctly?
+- Do players disappear from the map after they leave, rather than lingering?
+- Does the arrow point where the player is actually facing?

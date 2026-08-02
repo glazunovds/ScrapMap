@@ -1,193 +1,89 @@
 # ScrapMap
 
-Локальная карта и оконный overlay для Scrap Mechanic.
+A portable Windows overlay that draws a live map for Scrap Mechanic: a compact
+minimap pinned to the game window, expandable to a full map, with fog of war,
+markers, points of interest and player positions.
 
-Проект развивается как отдельное read-only приложение: он визуализирует
-полученные клиентом данные мира, но не изменяет инвентарь, серверное состояние
-или игровые RPC.
+Local-first and read-only with respect to gameplay. No Cheat Engine, no writes
+to game memory, no graphics hook, no installer and no background service.
 
-## Текущий checkpoint
+## What works
 
-В репозитории находится рабочий checkpoint Tauri 2 overlay:
+- Compact minimap attached to the game window, expanding to a full map
+- A tile atlas generated from the game's own terrain data — all 493 tiles, with
+  ground cover, water, hillshading, buildings and forest
+- Fog of war, with a reveal-all control
+- Points of interest by category, with icons, filters and search
+- Local markers, per-world profiles, separate profiles for peer-hosted worlds
+- Live position for the local player
 
-- текущий проверенный Canvas renderer запускается внутри WebView2;
-- компактное окно прозрачно, находится поверх остальных окон и пропускает
-  клики;
-- Win32 tracker находит `ScrapMechanic.exe`, привязывает окно к физической
-  client area игры и учитывает DPI;
-- mini автоматически скрывается при сворачивании игры или переключении на
-  другое приложение и возвращается при возврате в игру;
-- `Ctrl+Shift+M` переключает компактную и полную интерактивную карту;
-- `Ctrl+Shift+H` скрывает или возвращает overlay, причём ручное скрытие не
-  отменяется foreground-трекером;
-- `Ctrl+Shift+Q` полностью завершает тестовое приложение;
-- `Escape` возвращает полную карту в компактный режим;
-- временный диагностический JSON читается непосредственно Rust-кодом без
-  Node-сервера и localhost-порта;
-- неполная или некорректная запись не роняет приложение и не затирает
-  последнюю корректную позицию;
-- при загрузке layout Rust вычисляет канонические `worldFingerprint` и
-  `profileKey`, активирует изолированный SQLite-профиль и возвращает его
-  туман, локальные метки, настройки, активный маршрут и ограниченный хвост
-  последнего breadcrumb-трека;
-- записи профиля защищены текущими `profileKey + worldFingerprint +
-  sessionId`, поэтому отложенная операция предыдущего активного контекста
-  отклоняется; те же проверки применяются к узким командам сохранения
-  маршрута и пакетной записи breadcrumbs;
-- для peer-hosted мира Rust сопоставляет PID игры с её текущим bounded
-  `game-*.log`, превращает SteamID64 хоста в domain-separated SHA-256 и
-  автоматически восстанавливает профиль этого сервера; WebView принимает
-  identity только после согласования с live host/non-host телеметрией и
-  обезличенным connection observation; при смене observation секундный
-  монитор запускает новую активацию профиля с новым `sessionId`;
-- диагностическая телеметрия применяется только при положительном
-  возрастающем `sequence`: повторные и более старые кадры, а также кадры во
-  время переключения профиля отбрасываются. Это практический gate для PoC, а
-  не полный producer connection epoch;
-- если безопасно распознать сервер нельзя, fingerprint-only профиль работает
-  как read-only quarantine: туман, метки и настройки начинают сохраняться
-  только после выбора или создания именованного профиля в компактном диалоге;
-- прежние fog/marker/filter-данные Tauri PoC однократно переносятся из
-  `localStorage` в SQLite после подтверждённых native-записей локального
-  профиля; данные неизвестного удалённого сервера автоматически не смешиваются;
-- в Git включено только синтетическое demo. Capture-файлы, имена игроков,
-  локальные пути и игровые изображения намеренно исключены.
+Not yet: shared fog and markers between players, and photographed points of
+interest. See `docs/ROADMAP.md`.
 
-Трекер не читает память игры: он использует только обычные Win32-сведения об
-окне и process image с правом `PROCESS_QUERY_LIMITED_INFORMATION`. Распознавание
-peer-hosted сервера читает не более 4 MiB текущего игрового лога; сырой
-SteamID64, путь и строки лога не передаются в WebView и не сохраняются в
-SQLite. Диагностический JSON остаётся переходным источником до отдельного
-CE-free read-only bridge.
+## Running it
 
-## Разработка
+Launch Scrap Mechanic through Steam with `-dev` in the launch options, then
+start `scrapmap.exe`. It finds the game, attaches to its window and follows it.
 
-Требования для разработчика:
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+M` | Compact map ↔ full map |
+| `Ctrl+Shift+H` | Hide / show the overlay |
+| `Ctrl+Shift+Q` | Quit |
+| `Escape` | Return the full map to compact |
 
-- Node.js 20+;
-- pnpm;
-- Rust stable с target `x86_64-pc-windows-msvc`;
-- Visual Studio Build Tools с C++ workload;
-- WebView2 Runtime.
+The map needs a one-time setup that patches the game's Lua scripts:
 
-```powershell
+```bash
+node tools/game-patch.mjs snapshot   # once, on a clean install
+node tools/game-patch.mjs apply
+```
+
+Then load a survival world. The first load bakes the tile atlas — about twenty
+seconds, once. `node tools/game-patch.mjs revert` puts the game back.
+
+**Playing with someone else** requires both players to run identical patched
+files, because the game verifies script checksums on connect. See
+`docs/MULTIPLAYER-TEST.md`.
+
+## Building
+
+Requires Node.js 20+, pnpm, Rust stable `x86_64-pc-windows-msvc`, the Visual
+Studio Build Tools C++ workload, and the WebView2 Runtime.
+
+```bash
 pnpm install
-pnpm tauri dev
+pnpm tauri dev                 # development
+pnpm tauri build --no-bundle   # portable EXE
+pnpm test                      # frontend tests
+cargo test --manifest-path ./src-tauri/Cargo.toml
 ```
 
-Проверка frontend и Rust:
+The portable executable lands at `src-tauri\target\release\scrapmap.exe`. Use
+`pnpm tauri build`, not `cargo build` — a plain cargo build produces an EXE that
+looks for a dev server instead of the bundled frontend.
 
-```powershell
-pnpm build
-pnpm test
-cargo check --manifest-path .\src-tauri\Cargo.toml
-cargo test --manifest-path .\src-tauri\Cargo.toml
-```
+Runtime data lives in `%LOCALAPPDATA%\ScrapMap`: the SQLite database and the
+tile atlas cache. Everything in the atlas cache is disposable and rebuilds.
 
-Конечному пользователю Node, pnpm, Rust, Python, GCC или Visual Studio не
-потребуются. Релиз поставляется одним переносимым `scrapmap.exe`; системный
-Microsoft Edge WebView2 Runtime должен быть установлен в Windows.
+## Documentation
 
-## Portable release
+| Document | Contents |
+|---|---|
+| `CLAUDE.md` | Orientation, conventions, and the expensive lessons |
+| `docs/ARCHITECTURE.md` | How the pieces fit; identity and storage rules |
+| `docs/GAME-INTEGRATION.md` | The Lua patch, the atlas bake, POI photography |
+| `docs/MULTIPLAYER-TEST.md` | Instructions for the second player |
+| `docs/SYNC.md` | Shared fog and markers design (not started) |
+| `docs/ROADMAP.md` | Milestones and what remains |
+| `docs/DIAGNOSTIC-FEED.md` | Legacy JSON telemetry input |
 
-Release-сборка намеренно не создаёт MSI/NSIS, не устанавливает службу и не
-регистрирует updater:
+## Scope
 
-```powershell
-pnpm tauri build
-```
+Private project for a couple of people. It reads what the game already shows its
+own client and draws a map from it. It does not modify inventory, health,
+crafting, movement, combat or any server-controlled state, and it is not
+intended to.
 
-Готовый файл находится в:
-
-```text
-src-tauri\target\release\scrapmap.exe
-```
-
-Сам EXE можно хранить в любом каталоге. Пользовательские данные не записываются
-рядом с ним: диагностический канал и SQLite-профили мира располагаются в
-`%LOCALAPPDATA%\ScrapMap`. Удаление EXE не удаляет эти данные автоматически.
-На системе без WebView2 Runtime его нужно установить официальным средством
-Microsoft отдельно.
-
-## Диагностическая телеметрия
-
-По умолчанию приложение следит за:
-
-```text
-%LOCALAPPDATA%\ScrapMap\diagnostic\telemetry.json
-```
-
-Другой файл можно выбрать только для текущего запуска:
-
-```powershell
-.\scrapmap.exe --telemetry-file "D:\temporary\telemetry.json"
-```
-
-Также поддерживается переменная `SCRAPMAP_TELEMETRY_FILE`; аргумент командной
-строки имеет приоритет. Формат и ограничения описаны в
-[диагностическом канале](docs/DIAGNOSTIC-FEED.md).
-
-## Локальный tile atlas
-
-В установленной игре можно построить локальный manifest настоящих terrain
-preview-файлов:
-
-```powershell
-$gameRoot = "<путь к установленной Scrap Mechanic>"
-$atlasRoot = Join-Path $env:LOCALAPPDATA "ScrapMap\atlas"
-node tools/tile-atlas/index.mjs `
-  --game-root $gameRoot `
-  --output (Join-Path $atlasRoot "manifest.json") `
-  --copy-to (Join-Path $atlasRoot "tiles")
-```
-
-Manifest содержит только относительные пути, размеры и SHA-256; каталог
-`runtime/` игнорируется Git. В текущей установке найдено 807 preview-файлов
-размером 220×150 и 805 уникальных tile UUID. Portable EXE автоматически
-проверяет `%LOCALAPPDATA%\ScrapMap\atlas\manifest.json` и подгружает PNG по
-мере появления тайлов на экране; отдельный сервер или установленная Node.js
-для этого не нужны. Если каталог не создан, manifest повреждён или отдельный
-PNG недоступен, остаётся текущий schematic fallback. Для браузерного режима
-renderer по-прежнему можно подключить вручную через
-`window.SMMinimap.setTileAtlas(manifest, options)`.
-
-## Документация
-
-- [Архитектура](docs/ARCHITECTURE.md)
-- [Последовательность работ](docs/ROADMAP.md)
-- [Синхронизация через Cloudflare Worker](docs/SYNC.md)
-- [Диагностический JSON-канал](docs/DIAGNOSTIC-FEED.md)
-
-В текущем renderer уже есть локальный POI search spike: поиск работает по имени,
-английскому имени, aliases, категории и координатам загруженного layout; выбор
-результата центрирует карту и подсвечивает все клетки сгруппированного POI.
-
-## Наследие прототипа
-
-`public/map` временно содержит dependency-free HTML/CSS/JS renderer из
-исследовательского прототипа. После проверки поведения прозрачного WebView он
-будет постепенно разделён на:
-
-- framework-independent Canvas engine;
-- versioned domain contracts;
-- Vite + TypeScript UI;
-- Tauri data sources.
-
-Часть с Cheat Engine не переносится в продукт. До появления native read-only
-bridge она может использоваться только как внешний диагностический источник
-JSON во время разработки.
-
-M3 build probe уже умеет read-only вычислять SHA-256 executable активного
-процесса Scrap Mechanic без раскрытия пути и выбирает candidate native layout
-только при точном совпадении локального allowlist. Это пока диагностика, а не
-извлечение координат: `recognized` не станет `supported` до signature/prologue
-checks.
-
-Нижний native transport уже работает без CE: он открывает найденный игровой PID
-только для query/read, проверяет PE64 main module и умеет bounded-чтение через
-`ReadProcessMemory`. Адреса и содержимое памяти не передаются в WebView; до
-обнаружения и проверки конкретного telemetry layout координаты не публикуются.
-
-Хранение route/trail уже подключено как инфраструктура. Построение и
-отрисовка маршрута, а также автоматический sampling breadcrumbs остаются
-отдельным этапом навигации.
+Game files are never redistributed. The patch is exactly reversible, and the
+pristine copies it restores from are kept out of the repository.
