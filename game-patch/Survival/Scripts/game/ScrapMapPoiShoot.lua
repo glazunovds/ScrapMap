@@ -37,12 +37,14 @@ local function cameraHeight( metres )
 end
 
 local function shootLoad()
-	if not sm.json.fileExists( REQUEST_PATH ) then
-		return
-	end
+	-- Deliberately no sm.json.fileExists gate: it does not see files written
+	-- after the game started, which is exactly when ScrapMap writes the
+	-- request. Try to open it and let that answer the question, and say so
+	-- either way so a sweep that does not start is diagnosable from the log.
 	local ok, request = pcall( sm.json.open, REQUEST_PATH )
-	if not ok or type( request ) ~= "table" or type( request.targets ) ~= "table" then
-		sm.log.warning( "SCRAPMAP_SHOT_V1|error|capture request is unreadable" )
+	if not ok or type( request ) ~= "table" or type( request.targets ) ~= "table"
+		or #request.targets == 0 then
+		sm.log.info( "SCRAPMAP_SHOT_V1|idle|no readable capture request" )
 		return
 	end
 
