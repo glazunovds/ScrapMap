@@ -610,6 +610,50 @@ mod tests {
     }
 
     #[test]
+    fn each_corner_anchors_inside_the_client_area() {
+        // A 1000x800 client at the origin, 100 logical px of map, 20 of margin.
+        let client = ScreenRect::new(0, 0, 1_000, 800);
+        let place = |corner| {
+            mini_overlay_geometry(client, DEFAULT_DPI, 100, 20, corner).expect("geometry")
+        };
+
+        assert_eq!(place(MiniCorner::TopLeft).x, 20);
+        assert_eq!(place(MiniCorner::TopLeft).y, 20);
+        assert_eq!(place(MiniCorner::TopRight).x, 1_000 - 20 - 100);
+        assert_eq!(place(MiniCorner::TopRight).y, 20);
+        assert_eq!(place(MiniCorner::BottomLeft).x, 20);
+        assert_eq!(place(MiniCorner::BottomLeft).y, 800 - 20 - 100);
+        assert_eq!(place(MiniCorner::BottomRight).x, 1_000 - 20 - 100);
+        assert_eq!(place(MiniCorner::BottomRight).y, 800 - 20 - 100);
+
+        // Every corner must stay fully inside the client area.
+        for corner in [
+            MiniCorner::TopLeft,
+            MiniCorner::TopRight,
+            MiniCorner::BottomLeft,
+            MiniCorner::BottomRight,
+        ] {
+            let geometry = place(corner);
+            assert!(geometry.x >= 0 && geometry.y >= 0, "{corner:?} escaped");
+            assert!(
+                geometry.x + geometry.width as i32 <= 1_000
+                    && geometry.y + geometry.height as i32 <= 800,
+                "{corner:?} overflowed the client area"
+            );
+        }
+    }
+
+    #[test]
+    fn corner_codes_round_trip_from_the_frontend() {
+        assert_eq!(MiniCorner::from_code(0), MiniCorner::TopLeft);
+        assert_eq!(MiniCorner::from_code(1), MiniCorner::TopRight);
+        assert_eq!(MiniCorner::from_code(2), MiniCorner::BottomLeft);
+        assert_eq!(MiniCorner::from_code(3), MiniCorner::BottomRight);
+        // Anything unexpected falls back to the shipped default.
+        assert_eq!(MiniCorner::from_code(99), MiniCorner::TopRight);
+    }
+
+    #[test]
     fn empty_client_has_no_geometry() {
         assert_eq!(
             default_mini_overlay_geometry(ScreenRect::new(0, 0, 0, 720), 96),

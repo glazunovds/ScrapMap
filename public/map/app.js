@@ -2692,7 +2692,15 @@
 
   elements.miniCornerSelect?.addEventListener("change", () => applyMiniLayout(true));
   elements.miniSizeSelect?.addEventListener("change", () => applyMiniLayout(true));
-  restoreMiniLayout();
+
+  // overlay-bridge.js loads after this file, so its listener does not exist
+  // yet. Restoring now would dispatch into nothing and the saved corner would
+  // silently never be applied on startup.
+  if (document.readyState === "complete") {
+    restoreMiniLayout();
+  } else {
+    window.addEventListener("load", restoreMiniLayout, { once: true });
+  }
 
   elements.fogToggle.addEventListener("change", () => {
     state.fogEnabled = elements.fogToggle.checked;
