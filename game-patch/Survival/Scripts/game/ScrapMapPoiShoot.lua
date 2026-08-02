@@ -56,9 +56,13 @@ SCRAPMAP_SHOOT_VERSION = 4
 -- Seconds to hold the framed pose. Covers ScrapMap's poll and capture; the log
 -- line is emitted at the start so the capture lands mid-dwell.
 SCRAPMAP_SHOOT_DWELL = 2.0
--- Seconds spent hovering after arrival, so the cells around the destination
--- stream in before the ground is measured and the shot is framed.
-SCRAPMAP_SHOOT_SETTLE = 2.5
+-- Seconds spent hovering after arrival before the shot is framed.
+--
+-- This is waiting on rendering, not on the cell load -- the terrain surface can
+-- still be missing when everything standing on it has drawn, which photographs
+-- as the water plane seen through a hole where the ground should be. Four
+-- seconds rather than two and a half costs about three minutes across a sweep.
+SCRAPMAP_SHOOT_SETTLE = 4.0
 -- Seconds to let the second hop settle before the pose is announced, and how
 -- long to keep waiting for the character to actually be above the camera.
 SCRAPMAP_SHOOT_PERCH = 1.0

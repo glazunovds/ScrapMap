@@ -258,6 +258,33 @@ meadow tile with nine assets and a median ground of 0.4 m, so there is nothing
 about it that should be hard. It failed at `detail 0.0` twice, which is what the
 retry is for.
 
+## Reviewing a sweep
+
+`node tools/…` is not involved; the contact sheet is generated ad hoc beside the
+images so it can reference them rather than embed them — embedding 116 PNGs as
+data URIs came to 67 MB. Write an HTML grid to
+`%LOCALAPPDATA%\ScrapMaptlas\poi-contact-sheet.html` with
+`src="tiles/photo/<uuid>.png"` and open it in a browser. The in-app preview pane
+will not load the sibling images from `file://`.
+
+Two failure modes survived into a reviewed sweep, and they look alike on the map
+but are not:
+
+- **Ordinary third-person gameplay, HUD and all.** The pose was not applied. The
+  clearances on those tiles were 291–305 m, so the player was perched correctly;
+  it was the camera that was wrong. Fixed by insisting on the pose every frame of
+  the exposure rather than only when the character changes.
+- **A correct top-down frame with no ground in it.** Objects render, the terrain
+  surface does not, and the water plane shows through. Nothing about the framing
+  is wrong — it is purely a race with rendering, so the settle went from 2.5 s to
+  4 s.
+
+Neither is caught by the capture guards: both frames are bright and full of
+contrast. If the second one recurs, the cheap detector is to compare the fraction
+of the photograph that reads as water against the fraction of the tile that is
+below the waterline in the baked height raster — a farming patch photographing as
+60% water is not a close call. The data for both sides already exists.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** They are photographed turned and
