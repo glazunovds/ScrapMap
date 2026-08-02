@@ -908,6 +908,7 @@
 
     let confirmedObservationId = null;
     let confirmationCount = 0;
+    let lastIdentityAttempt = null;
     for (let attempt = 0; attempt < 12; attempt += 1) {
       if (latestProfileJob !== job) {
         return { kind: "unknown", stableId: null };
@@ -921,6 +922,15 @@
         if (nativeIdentity) {
           lastConnectionObservationId = nativeIdentity.observationId;
         }
+        lastIdentityAttempt = {
+          telemetryState: status?.state ?? null,
+          layoutMatches: telemetryMatchesLayout(telemetry, job.layout.sourceWorldId),
+          isHost: telemetry?.source?.isHost ?? null,
+          identityKind: nativeIdentity?.kind ?? null,
+          baseline: job.connectionObservationBaseline,
+          observation: nativeIdentity?.observationId ?? null,
+          confirmations: confirmationCount
+        };
         if (
           status?.state === "active" &&
           telemetryMatchesLayout(telemetry, job.layout.sourceWorldId)
@@ -965,7 +975,10 @@
         await delay(125);
       }
     }
-    note("identity-gave-up", { world: job.layout.sourceWorldId });
+    note("identity-gave-up", {
+      world: job.layout.sourceWorldId,
+      last: lastIdentityAttempt
+    });
     return { kind: "unknown", stableId: null };
   }
 
@@ -1287,9 +1300,18 @@
       options && typeof options === "object" ? options : {};
     const hadPriorProfileContext = Boolean(latestProfileJob);
     const previousActiveProfile = activeProfile;
+    // Only the profile being replaced, never the last observation seen.
+    //
+    // The baseline exists so that switching profiles waits for a genuinely new
+    // connection rather than confirming against the one already in hand. On a
+    // cold start there is no profile to be newer than, and falling back to the
+    // last observation meant the current connection was its own baseline: never
+    // fresh, never confirmed, and the world stayed quarantined with saving
+    // suspended. The once-a-second observation refresh sets that value before
+    // the first job runs, so this only failed when startup was slow enough --
+    // which is why it looked intermittent.
     const connectionObservationBaseline =
-      previousActiveProfile?.job?.connectionObservationId ||
-      lastConnectionObservationId;
+      previousActiveProfile?.job?.connectionObservationId || null;
     if (activeProfile) {
       activeProfile.writable = false;
       activeProfile = null;
