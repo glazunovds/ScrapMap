@@ -326,7 +326,7 @@
     if (!profileCandidates.length) {
       const empty = document.createElement("p");
       empty.className = "profile-candidate-empty";
-      empty.textContent = "Именованных профилей для этой карты пока нет.";
+      empty.textContent = text("PROFILE_NONE_YET");
       list.appendChild(empty);
       return;
     }
@@ -388,7 +388,7 @@
     }
     if (profileElements.copy) {
       profileElements.copy.textContent = manualAllowed
-        ? "Идентификатор сервера недоступен. Выберите профиль, чтобы туман и метки одинаковых карт не смешались."
+        ? text("PROFILE_DIALOG_COPY")
         : "Этот профиль распознан автоматически; ручной выбор не требуется.";
     }
     renderProfileCandidates(profileUiSnapshot);
@@ -901,6 +901,17 @@
     }
   }
 
+  /**
+   * How long identity resolution waits, at 125 ms a step.
+   *
+   * It used to be twelve steps -- a second and a half -- and needed five
+   * consecutive agreements inside that. Telemetry going stale for a moment was
+   * enough to spend the budget at three of five, after which the world fell
+   * back to unknown and saving stayed suspended. Waiting is free here; giving
+   * up costs the user their fog.
+   */
+  const IDENTITY_ATTEMPTS = 80;
+
   async function serverIdentityForProfile(job) {
     if (job.layout.sourceWorldId.startsWith("demo-")) {
       return { kind: "local", stableId: null };
@@ -909,7 +920,7 @@
     let confirmedObservationId = null;
     let confirmationCount = 0;
     let lastIdentityAttempt = null;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (let attempt = 0; attempt < IDENTITY_ATTEMPTS; attempt += 1) {
       if (latestProfileJob !== job) {
         return { kind: "unknown", stableId: null };
       }
@@ -959,19 +970,20 @@
               };
             }
           } else {
+            // Disagreement is evidence; a gap in telemetry is not.
             confirmedObservationId = null;
             confirmationCount = 0;
           }
         }
       } catch (error) {
-        if (attempt === 11) {
+        if (attempt === IDENTITY_ATTEMPTS - 1) {
           console.warn(
             "ScrapMap could not infer local/server profile identity",
             error
           );
         }
       }
-      if (attempt < 11) {
+      if (attempt < IDENTITY_ATTEMPTS - 1) {
         await delay(125);
       }
     }

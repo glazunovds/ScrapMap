@@ -125,5 +125,6 @@
   "POI_CAT_LANDMARK": "Прочие ориентиры",
   "POI_CAT_FILLER": "Случайная генерация",
   "SESSION_EXPLORED_OF": "{visited} из {total} клеток",
-  "DRAWER_CELLS": "{count} клеток"
+  "DRAWER_CELLS": "{count} клеток",
+  "PROFILE_NONE_YET": "Именованных профилей для этой карты пока нет."
 }

@@ -125,5 +125,6 @@
   "POI_CAT_LANDMARK": "Other landmarks",
   "POI_CAT_FILLER": "Generator filler",
   "SESSION_EXPLORED_OF": "{visited} of {total} cells",
-  "DRAWER_CELLS": "{count} cells"
+  "DRAWER_CELLS": "{count} cells",
+  "PROFILE_NONE_YET": "No named profiles for this map yet."
 }
