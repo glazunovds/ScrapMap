@@ -9,6 +9,9 @@ use std::{
 use crate::diagnostic_source::{TelemetryPlayer, TelemetrySnapshot, TelemetrySource};
 
 const PREFIX: &str = "SCRAPMAP_TELEMETRY_V1|";
+/// The game announces who it is connecting to when a world loads. `self` means
+/// this machine is the host.
+const CONNECT_MARKER: &str = "[Network] Connecting to ";
 const PLAYER_STALE_AFTER: Duration = Duration::from_millis(1500);
 
 struct SeenPlayer {
@@ -22,6 +25,8 @@ pub(crate) struct GameLogSource {
     path: Option<PathBuf>,
     offset: u64,
     players: BTreeMap<String, SeenPlayer>,
+    /// Whether this machine hosts the session, from the log's connect line.
+    is_host: Option<bool>,
     sequence: u64,
 }
 
@@ -41,6 +46,7 @@ impl GameLogSource {
             self.path = Some(latest.clone());
             self.offset = 0;
             self.players.clear();
+            self.is_host = None;
         }
         let mut file = File::open(latest).ok()?;
         let length = file.metadata().ok()?.len();
@@ -53,6 +59,9 @@ impl GameLogSource {
         let mut line = String::new();
         let mut updated = false;
         while reader.read_line(&mut line).ok()? > 0 {
+            if let Some((_, target)) = line.split_once(CONNECT_MARKER) {
+                self.is_host = Some(target.trim() == "self");
+            }
             if let Some(player) = parse_line(&line) {
                 self.players.insert(
                     player.id.clone().unwrap_or_default(),
@@ -103,7 +112,12 @@ impl GameLogSource {
             source: Some(TelemetrySource {
                 source_type: "scrapmap-game-log".to_owned(),
                 enumeration: "client-visible-players".to_owned(),
-                is_host: false,
+                // Reported rather than assumed. This was hardcoded false, and
+                // the frontend cross-checks it against the server identity
+                // probe -- which correctly reads `Connecting to self` as local.
+                // The two could never agree, so a singleplayer world never
+                // acquired a profile and every save stayed suspended.
+                is_host: self.is_host.unwrap_or(false),
                 compatibility: Some("survival-lua-v1".to_owned()),
             }),
             player: local,
@@ -182,6 +196,38 @@ fn parse_line(line: &str) -> Option<TelemetryPlayer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hosting_is_read_from_the_connect_line() {
+        // The frontend cross-checks this against the server identity probe. A
+        // hardcoded `false` disagreed with the probe's "local" forever, so a
+        // singleplayer world never acquired a profile and every save stayed
+        // suspended.
+        let root = std::env::temp_dir().join(format!(
+            "scrapmap-host-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("game-20260101-010101.log"),
+            "12:00 [Main:1] [Network] Connecting to self\n\
+             12:00 [Lua] SCRAPMAP_TELEMETRY_V1|1|1|Local|7|1|2|3|0|1|0\n",
+        )
+        .unwrap();
+
+        let mut source = GameLogSource::default();
+        source.set_root(Some(root.clone()));
+        let snapshot = source.poll().expect("a local player should publish");
+        assert!(
+            snapshot.source.as_ref().unwrap().is_host,
+            "connecting to self means this machine hosts"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     #[test]
     fn parses_prefixed_player_line() {
         let player = parse_line(
