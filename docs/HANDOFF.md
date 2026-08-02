@@ -307,6 +307,40 @@ Their photographs are deleted rather than left broken, so those four render from
 the generated atlas. That is the right outcome: a clean schematic tile beats a
 blank one, and nobody looking at the map can tell.
 
+## The verdict: eleven photographs, not a hundred and twelve
+
+Reviewed on the map rather than in the contact sheet, most photographs are not
+worth having. They are variously misplaced, cut off, wrongly zoomed, or simply
+the wrong shape against their neighbours, and a schematic tile beats a bad
+photograph every time. The user picked the ones that earn their place:
+
+| Kept | |
+|---|---|
+| `baf427f1` | POI_CRASHSITE_AREA |
+| `7d7556b3` | POI_HIDEOUT_XL |
+| `c1af7c32` | POI_RUINCITY_XL |
+| `2510a9a4` | POI_LABYRINTH_MEDIUM |
+| `9f3b2d02` | POI_PACKINGSTATIONFRUIT_MEDIUM |
+| `761f7dca` | POI_FARMINGPATCH |
+| `5174bec6`, `69c5db97`, `cdaaf827` | POI_ROAD_KIOSK |
+| `2908dd45` | POI_ROAD_SCHEMATICSTATION |
+| `013e980d` | POI_ROAD_CHEMPOOL |
+
+Fifteen coordinates collapse to eleven tiles, because a tile photographed once
+serves every placement of it — three of those coordinates are the same kiosk.
+
+The other 101 are **hidden, not deleted**: `tiles/photo-hidden/` and
+`tiles/photo-raw-hidden/`. Move a file back into `tiles/photo/` and the next
+atlas refresh republishes it. Their tiles render from the generated atlas
+meanwhile, which is what they should have been doing all along.
+
+**Where this points next.** The photography was the wrong lever. What the map
+actually wants is the *generated* tiles rendered better — higher resolution, and
+the placed objects drawn properly rather than as blobs. That needs no game, no
+sweep, and no camera: `atlas_bake.rs` already has the asset positions, radii and
+now heights, and the raw samples are all kept so nothing has to be re-baked to
+try a different rendering.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** They are photographed turned and
