@@ -878,13 +878,28 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                     for event in shot_watcher.poll(&directory) {
                         match event {
                             poi_capture::ShotEvent::Ready { uuid, crop, .. } if window != 0 => {
-                                // Let the scene finish streaming before looking.
-                                thread::sleep(Duration::from_millis(1_200));
-                                match atlas_bake::atlas_root()
-                                    .ok_or_else(|| "LOCALAPPDATA is not set".to_owned())
-                                    .and_then(|root| {
-                                        poi_capture::capture_tile(window, &uuid, crop, &root)
-                                    }) {
+                                // Let the scene finish streaming before looking,
+                                // then try more than once. A grab that lands
+                                // while the window is mid-present comes back a
+                                // single flat colour -- `detail 0.0`, which is
+                                // neither terrain nor sky -- and one retry
+                                // inside the same dwell recovers it. The budget
+                                // is the sweep's two-second pose.
+                                thread::sleep(Duration::from_millis(700));
+                                let mut attempt = 0;
+                                let outcome = loop {
+                                    attempt += 1;
+                                    let result = atlas_bake::atlas_root()
+                                        .ok_or_else(|| "LOCALAPPDATA is not set".to_owned())
+                                        .and_then(|root| {
+                                            poi_capture::capture_tile(window, &uuid, crop, &root)
+                                        });
+                                    if result.is_ok() || attempt >= 3 {
+                                        break result;
+                                    }
+                                    thread::sleep(Duration::from_millis(350));
+                                };
+                                match outcome {
                                     Ok(_) => {
                                         // Published now rather than at the end:
                                         // a sweep that is interrupted should

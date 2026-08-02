@@ -242,12 +242,21 @@ Measured over the 116 photographs:
 runs from −2 to −55, meaning red-dominant, and inspecting one shows desert and
 rock. Do not add that guard; it would delete good desert tiles.
 
-Nine tiles are still outstanding, all rejected by the capture guards: eighteen
-rejections read `detail 0.0–3.7` (an essentially uniform frame) and one is a
-Windows `invalid window handle`. A perfectly uniform frame is not terrain and not
-sky, which points at the capture landing while the window was mid-transition
-rather than at the framing. `remaining_targets` will offer exactly those nine on
-the next prepare.
+Nine tiles were rejected by the capture guards. `remaining_targets` offered
+exactly those nine on the next prepare and eight of them succeeded, leaving
+**115 of 116**.
+
+The rejections were not a framing problem. Eighteen read `detail 0.0–3.7` — an
+essentially uniform frame, which is neither terrain nor sky — and one was a
+Windows `invalid window handle`. That is a grab landing while the window is
+mid-present. The capture now retries up to three times inside the same
+two-second pose (700 ms, then 350 ms apart) rather than accepting the first
+frame.
+
+The one remaining tile is `139ff089`, `POI_FOREST_CAMP`: an ordinary one-cell
+meadow tile with nine assets and a median ground of 0.4 m, so there is nothing
+about it that should be hard. It failed at `detail 0.0` twice, which is what the
+retry is for.
 
 ## Open questions
 
