@@ -12,6 +12,12 @@ the game's own camera.
 
 Not working: shared fog and markers.
 
+The tile atlas renders at four pixels per sampled metre, and buildings, wrecks
+and rock formations are drawn from their own collision-mesh footprints rather
+than as tinted discs. POI photography exists and works, but only eleven
+photographs survived review — see `HANDOFF.md` for why, and why the generated
+tiles turned out to be the better lever.
+
 ## Done
 
 **M0–M2** — repository and contracts, the Tauri overlay, world/server profiles
@@ -61,9 +67,10 @@ higher than itself leans out over the tile's edges, so each tile is measured for
 what is standing on it and the camera pulls back proportionally, with ScrapMap
 cropping the surplus. `GAME-INTEGRATION.md` has the details.
 
-116 of 116 tiles photographed, one of them white. Not worth chasing a single
-frame; if the failure rate climbs, the frame guards in `poi_capture.rs` are the
-place to look.
+Reviewed on the map, most photographs were not worth keeping: eleven are
+published and the rest are hidden. The conclusion that matters is in
+`HANDOFF.md` — the atlas draws the map better than the camera photographs it,
+and it needs no game running to do it.
 
 ## Next
 

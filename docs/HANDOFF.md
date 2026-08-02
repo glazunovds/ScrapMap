@@ -341,6 +341,24 @@ sweep, and no camera: `atlas_bake.rs` already has the asset positions, radii and
 now heights, and the raw samples are all kept so nothing has to be re-baked to
 try a different rendering.
 
+## What replaced it: drawing the tiles properly
+
+Two changes, neither needing a camera:
+
+- **Four output pixels per sampled one**, capped at 2048 px an image. The
+  terrain gains nothing — the game is only asked for 64 samples per cell — but
+  everything drawn *into* the tile does, and at one pixel per metre a tree was a
+  three-pixel disc.
+- **Buildings, wrecks and rock formations are filled from their collision-mesh
+  footprint**, rotated to their placement. `asset_catalogue` was already opening
+  those meshes to measure a radius and throwing the outline away. Foliage keeps
+  the disc: a canopy really is a soft circle from above.
+
+The rotation problem that dogged the photographs collapsed with them. Ten of the
+eleven kept tiles were photographed at an unrotated placement, so only
+`2510a9a4` is drawn turned twice — and it is the one already noted as imperfect.
+There is no longer a case for building the correction.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** They are photographed turned and
