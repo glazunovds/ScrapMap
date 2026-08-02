@@ -693,6 +693,26 @@ fn patch_targets(state: &OverlayState) -> Result<(PathBuf, PathBuf), String> {
     Ok((game_root, cache_root))
 }
 
+/// Appends a line to `%LOCALAPPDATA%\ScrapMap\ui.log`.
+///
+/// A release build has no devtools, so when the panel misbehaves there is
+/// nothing to read. Guessing at the profile state machine from the outside cost
+/// two wrong diagnoses; this makes it observable instead.
+#[tauri::command]
+fn log_ui_event(message: String) -> Result<(), String> {
+    use std::io::Write as _;
+    let root = atlas_bake::atlas_root()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .ok_or("LOCALAPPDATA is not set")?;
+    let line: String = message.chars().take(400).collect();
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("ui.log"))
+        .map_err(|error| error.to_string())?;
+    writeln!(file, "{line}").map_err(|error| error.to_string())
+}
+
 /// Remembers the interface language for the parts built before the WebView.
 #[tauri::command]
 fn set_interface_language(language: String) -> Result<(), String> {
@@ -1346,6 +1366,7 @@ pub fn run() {
             diagnostic_status,
             game_layout_snapshot,
             atlas_bake_refresh,
+            log_ui_event,
             set_interface_language,
             game_patch_status,
             game_patch_apply,

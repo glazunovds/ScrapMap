@@ -5,6 +5,23 @@
    *  degrades to something identifiable rather than to blank UI. */
   const text = (key) => window.SMText?.t(key) ?? key;
 
+  /** Writes a line to ui.log. A release build has no console to read. */
+  let noteSequence = 0;
+  function note(what, detail) {
+    noteSequence += 1;
+    try {
+      // A rejected promise is not caught by try/catch, and a host that does
+      // not know the command must not surface as an unhandled rejection.
+      window.__TAURI__?.core
+        ?.invoke?.("log_ui_event", {
+          message: `${noteSequence} ${what} ${JSON.stringify(detail ?? null)}`
+        })
+        ?.catch?.(() => {});
+    } catch (_error) {
+      /* diagnostics must never break what they are diagnosing */
+    }
+  }
+
 
   const tauri = window.__TAURI__;
   const invoke = tauri?.core?.invoke;
@@ -948,6 +965,7 @@
         await delay(125);
       }
     }
+    note("identity-gave-up", { world: job.layout.sourceWorldId });
     return { kind: "unknown", stableId: null };
   }
 
@@ -1195,6 +1213,13 @@
       }
 
       const candidates = await loadManualProfileCandidates(snapshot, job);
+      note("activated", {
+        needsSelection,
+        jobWorld: job.layout.sourceWorldId,
+        contextWorld: window.SMMinimap?.getProfileContext?.()?.sourceWorldId ?? null,
+        latestIsJob: latestProfileJob === job,
+        generationMatches: job.generation === profileGeneration
+      });
       isCurrent =
         latestProfileJob === job &&
         job.generation === profileGeneration &&
@@ -1242,6 +1267,7 @@
           true
         );
       }
+      note("activation-threw", String(error?.message || error));
       console.error("ScrapMap profile activation failed", error);
     }
   }
