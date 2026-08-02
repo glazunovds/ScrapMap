@@ -260,13 +260,27 @@ retry is for.
 
 ## Open questions
 
-**The 33 tiles with no unrotated placement.** The fix is to rotate the captured
-image by the inverse before storing, so every photograph ends up in the same
-unrotated convention as the generated tiles. What is not established is the
-direction: the mapping from world axes to screen axes with the camera pointing
-straight down has never been observed. Do not guess it — photograph one tile
-with a known asymmetric layout, compare against its generated tile, and read the
-direction off that.
+**The 33 tiles with no unrotated placement.** They are photographed turned and
+the renderer turns them again. The fix is to rotate the stored image by the
+inverse, but the direction — how world axes map to screen axes with the camera
+pointing straight down — is still unestablished.
+
+Two attempts to settle it offline both failed, and are recorded here so nobody
+repeats them:
+
+1. **Correlate each photograph against its generated tile** under all eight
+   dihedral transforms. Correlation came out near zero *even at rotation 0*,
+   where the two must already agree. A schematic palette-and-hillshade render
+   and a real lit scene simply do not correlate on luminance.
+2. **Correlate photographed water against the baked height raster's water mask**,
+   using blue-minus-red as the water signal and only tiles between 12% and 88%
+   wet. Nothing matched above 0.5, again including rotation 0.
+
+So it needs the game: photograph one tile with a deliberately asymmetric,
+recognisable layout, put it beside its generated tile, and read the direction
+off by eye. Everything else is in place — `CaptureTarget.rotation` already
+carries the value, and 83 of 116 tiles dodge the problem entirely by being
+photographed at an unrotated placement.
 
 **18 of 116 photographs are night.** Mean brightness under 60 against a median
 of 106. The sweep takes about fifteen minutes and runs through the day/night
