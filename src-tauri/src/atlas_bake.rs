@@ -20,7 +20,7 @@ use crate::asset_catalogue::{self, AssetInfo, AssetKind, GroundCover};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
-const GENERATED_DIRECTORY: &str = "generated";
+pub(crate) const GENERATED_DIRECTORY: &str = "generated";
 /// Where the POI photography sweep leaves its captures. Named here as well as in
 /// `poi_capture` because the manifest merge has to know a photograph outranks
 /// the tile it would otherwise point at.

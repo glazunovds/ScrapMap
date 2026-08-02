@@ -27,6 +27,21 @@ use crate::{
 /// Where the sweep request is left for Lua to find on the next world load.
 const REQUEST_FILE: &str = "ScrapMapCapture.json";
 const PHOTO_DIRECTORY: &str = "photo";
+/// Untouched captures. The published photograph is tone-matched to the
+/// generated atlas, and keeping the original means the match can be retuned
+/// without flying the sweep again.
+use crate::atlas_bake::GENERATED_DIRECTORY;
+
+const RAW_PHOTO_DIRECTORY: &str = "photo-raw";
+/// How far a photograph is pulled towards the generated tile's brightness and
+/// contrast, 0 = leave it alone, 1 = match exactly.
+///
+/// Measured over 112 tiles, photographs average 24 levels brighter than the
+/// atlas and span a 65-level range against its 24 -- night captures 69 below,
+/// desert 56 above. That spread is what makes them read as patches. Matching
+/// completely would flatten out the very detail they are there for, so this
+/// closes most of the gap and leaves them looking like photographs.
+const TONE_MATCH: f32 = 0.75;
 /// Stored edge length. Generous enough to stay sharp when a tile fills the
 /// screen, small enough that a hundred of them stay a reasonable cache.
 const PHOTO_EDGE: u32 = 512;
@@ -373,11 +388,129 @@ pub fn capture_tile(
         .resize(PHOTO_EDGE)
         .ok_or("could not rescale the capture")?;
 
-    let directory = atlas_root.join("tiles").join(PHOTO_DIRECTORY);
+    let key = uuid.to_ascii_lowercase();
+    let tiles = atlas_root.join("tiles");
+    let raw_directory = tiles.join(RAW_PHOTO_DIRECTORY);
+    fs::create_dir_all(&raw_directory).map_err(|error| error.to_string())?;
+    write_png(&raw_directory.join(format!("{key}.png")), &scaled)?;
+
+    publish_toned(atlas_root, &key)
+}
+
+/// Mean and spread of a frame's luminance.
+fn tone_of(frame: &Frame) -> (f32, f32) {
+    let count = (frame.pixels.len() / 4).max(1) as f32;
+    let luminance = |chunk: &[u8]| {
+        0.299 * f32::from(chunk[0]) + 0.587 * f32::from(chunk[1]) + 0.114 * f32::from(chunk[2])
+    };
+    let mean = frame.pixels.chunks_exact(4).map(luminance).sum::<f32>() / count;
+    let variance = frame
+        .pixels
+        .chunks_exact(4)
+        .map(|chunk| (luminance(chunk) - mean).powi(2))
+        .sum::<f32>()
+        / count;
+    (mean, variance.sqrt())
+}
+
+/// Writes the published photograph from the raw capture, toned to match the
+/// generated tile it sits beside.
+///
+/// A tile with no generated counterpart is published unchanged -- there is
+/// nothing to match it to, and an untoned photograph is still a photograph.
+fn publish_toned(atlas_root: &Path, key: &str) -> Result<PathBuf, String> {
+    let tiles = atlas_root.join("tiles");
+    let raw_path = tiles.join(RAW_PHOTO_DIRECTORY).join(format!("{key}.png"));
+    let mut frame = read_png(&raw_path)?;
+
+    if let Ok(generated) = read_png(&tiles.join(GENERATED_DIRECTORY).join(format!("{key}.png"))) {
+        let (photo_mean, photo_spread) = tone_of(&frame);
+        let (target_mean, target_spread) = tone_of(&generated);
+        if photo_spread > 1.0 {
+            // Contrast first, then brightness, both eased by TONE_MATCH. The
+            // gain is bounded because a low-contrast capture would otherwise be
+            // stretched into noise.
+            let gain = (1.0 + TONE_MATCH * (target_spread / photo_spread - 1.0)).clamp(0.6, 1.6);
+            let mean = photo_mean + TONE_MATCH * (target_mean - photo_mean);
+            for chunk in frame.pixels.chunks_exact_mut(4) {
+                for channel in &mut chunk[..3] {
+                    let shifted = (f32::from(*channel) - photo_mean) * gain + mean;
+                    *channel = shifted.clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
+
+    let directory = tiles.join(PHOTO_DIRECTORY);
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let path = directory.join(format!("{}.png", uuid.to_ascii_lowercase()));
-    write_png(&path, &scaled)?;
+    let path = directory.join(format!("{key}.png"));
+    write_png(&path, &frame)?;
     Ok(path)
+}
+
+fn read_png(path: &Path) -> Result<Frame, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut reader = png::Decoder::new(file)
+        .read_info()
+        .map_err(|error| error.to_string())?;
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let frame = reader
+        .next_frame(&mut buffer)
+        .map_err(|error| error.to_string())?;
+    let channels = match frame.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        other => return Err(format!("unsupported colour type {other:?}")),
+    };
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in buffer[..frame.buffer_size()].chunks_exact(channels) {
+        pixels.extend_from_slice(&[chunk[0], chunk[1], chunk[2]]);
+        pixels.push(if channels == 4 { chunk[3] } else { 255 });
+    }
+    Ok(Frame {
+        width,
+        height,
+        pixels,
+    })
+}
+
+/// Rebuilds every published photograph from its raw capture.
+///
+/// Also migrates a cache written before raws were kept, by adopting the
+/// published photograph as the raw one. Returns how many were rewritten.
+pub fn retone_cache(atlas_root: &Path) -> usize {
+    let tiles = atlas_root.join("tiles");
+    let raw_directory = tiles.join(RAW_PHOTO_DIRECTORY);
+    let _ = fs::create_dir_all(&raw_directory);
+
+    if let Ok(listing) = fs::read_dir(tiles.join(PHOTO_DIRECTORY)) {
+        for entry in listing.filter_map(Result::ok) {
+            let name = entry.file_name();
+            if !raw_directory.join(&name).exists() {
+                let _ = fs::copy(entry.path(), raw_directory.join(&name));
+            }
+        }
+    }
+
+    let Ok(listing) = fs::read_dir(&raw_directory) else {
+        return 0;
+    };
+    let mut rewritten = 0;
+    for entry in listing.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|value| value != "png") {
+            continue;
+        }
+        let Some(key) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if publish_toned(atlas_root, &key.to_ascii_lowercase()).is_ok() {
+            rewritten += 1;
+        }
+    }
+    rewritten
 }
 
 fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
@@ -586,6 +719,53 @@ mod tests {
         assert_eq!(absurd.2, MIN_CROP);
         let backwards = parse_ready("SCRAPMAP_SHOT_V1|ready|camp|1|2|1|64.00|8.0").unwrap();
         assert_eq!(backwards.2, 1.0);
+    }
+
+    #[test]
+    fn toning_moves_a_photograph_towards_its_generated_tile() {
+        fn flat(value: u8, spread: u8, edge: u32) -> Frame {
+            let mut pixels = Vec::new();
+            for index in 0..(edge * edge) {
+                // Alternating levels give the frame a measurable spread.
+                let level = if index % 2 == 0 {
+                    value.saturating_sub(spread)
+                } else {
+                    value.saturating_add(spread)
+                };
+                pixels.extend_from_slice(&[level, level, level, 255]);
+            }
+            Frame { width: edge, height: edge, pixels }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "scrapmap-tone-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        let tiles = root.join("tiles");
+        fs::create_dir_all(tiles.join(RAW_PHOTO_DIRECTORY)).unwrap();
+        fs::create_dir_all(tiles.join(GENERATED_DIRECTORY)).unwrap();
+
+        // A night capture: far darker and punchier than the atlas beside it.
+        write_png(&tiles.join(RAW_PHOTO_DIRECTORY).join("t.png"), &flat(60, 40, 8)).unwrap();
+        write_png(&tiles.join(GENERATED_DIRECTORY).join("t.png"), &flat(120, 15, 8)).unwrap();
+
+        assert_eq!(retone_cache(&root), 1);
+
+        let published = read_png(&tiles.join(PHOTO_DIRECTORY).join("t.png")).unwrap();
+        let (mean, spread) = tone_of(&published);
+        // Most of the way to the atlas, but not all the way -- the photograph
+        // should still look like one.
+        assert!(mean > 95.0 && mean < 120.0, "mean was {mean}");
+        assert!(spread < 40.0 && spread > 10.0, "spread was {spread}");
+
+        // The raw capture is untouched, so the match can be retuned later.
+        let (raw_mean, _) = tone_of(&read_png(&tiles.join(RAW_PHOTO_DIRECTORY).join("t.png")).unwrap());
+        assert!((raw_mean - 60.0).abs() < 1.0, "raw was {raw_mean}");
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

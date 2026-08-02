@@ -573,7 +573,16 @@ fn atlas_bake_refresh(
     let Some(atlas_root) = atlas_bake::atlas_root() else {
         return Err("LOCALAPPDATA is not set".to_owned());
     };
-    atlas_bake::convert_baked_atlas(game_root, &atlas_root).map(Some)
+    let report = atlas_bake::convert_baked_atlas(game_root, &atlas_root)?;
+    // After the generated tiles are current, republish the photographs against
+    // them. A photograph is toned to the tile it sits beside, so it has to be
+    // rebuilt whenever that tile changes -- and this is also what migrates a
+    // cache written before the raw captures were kept.
+    let retoned = poi_capture::retone_cache(&atlas_root);
+    if retoned > 0 {
+        println!("ScrapMap re-toned {retoned} point-of-interest photographs");
+    }
+    Ok(Some(report))
 }
 
 #[tauri::command]
