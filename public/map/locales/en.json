@@ -123,5 +123,7 @@
   "POI_CAT_STATION": "Stations and trader",
   "POI_CAT_DUNGEON": "Dungeons",
   "POI_CAT_LANDMARK": "Other landmarks",
-  "POI_CAT_FILLER": "Generator filler"
+  "POI_CAT_FILLER": "Generator filler",
+  "SESSION_EXPLORED_OF": "{visited} of {total} cells",
+  "DRAWER_CELLS": "{count} cells"
 }

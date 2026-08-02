@@ -1965,7 +1965,9 @@
       const percent = total ? Math.round((knownVisited / total) * 100) : 0;
       const markers = allMarkers();
       elements.visitedMetric.textContent = `${percent}%`;
-      elements.visitedDetail.textContent = `${knownVisited} из ${total} клеток`;
+      elements.visitedDetail.textContent = text("SESSION_EXPLORED_OF")
+        .replace("{visited}", knownVisited)
+        .replace("{total}", total);
       elements.markersMetric.textContent = String(markers.length);
       if (elements.poiMetric) {
         const counts = poiCounts();
@@ -2284,7 +2286,8 @@
           ? [state.lastLocalPlayer]
           : []
     );
-    elements.layoutFileStatus.textContent = sourceName || `${layout.cells.length} клеток`;
+    elements.layoutFileStatus.textContent =
+      sourceName || text("DRAWER_CELLS").replace("{count}", layout.cells.length);
     elements.layoutFileStatus.classList.add("is-loaded");
     centerOnPlayer();
     invalidateStaticFrame();
@@ -2420,7 +2423,8 @@
       nextVisited.size !== state.visited.size ||
       Array.from(nextVisited).some((key) => !state.visited.has(key));
     state.visited = nextVisited;
-    elements.visitedFileStatus.textContent = sourceName || `${visited.keys.size} клеток`;
+    elements.visitedFileStatus.textContent =
+      sourceName || text("DRAWER_CELLS").replace("{count}", visited.keys.size);
     elements.visitedFileStatus.classList.add("is-loaded");
     if (changed) {
       invalidateStaticFrame();

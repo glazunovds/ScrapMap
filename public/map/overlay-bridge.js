@@ -1617,6 +1617,20 @@
     }
   });
 
+  // A throw anywhere in the panel used to be invisible: no console in a
+  // release build, and the symptom surfaces somewhere unrelated. One that
+  // aborted applyLayout before it announced the world left the profile
+  // permanently unresolved, with nothing to read.
+  window.addEventListener("error", (event) => {
+    note("uncaught", {
+      message: String(event?.message || ""),
+      at: `${event?.filename || "?"}:${event?.lineno || 0}`
+    });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    note("unhandled-rejection", String(event?.reason?.message || event?.reason || ""));
+  });
+
   // Strings arrive after the first render, and again whenever the language
   // changes, so anything drawn from a key has to be drawn again.
   window.addEventListener("sm-minimap:language", () => {
