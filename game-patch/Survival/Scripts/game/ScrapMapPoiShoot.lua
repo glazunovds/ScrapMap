@@ -81,9 +81,11 @@ local TRAVEL_CAMERA_LIFT = 40
 -- How far above the camera the second hop parks the player. Everything below
 -- the camera is in shot, so this is the whole reason the character stays out of
 -- the photograph. It also has to outlast the fall: the player is in free fall
--- from the moment it is recreated, and the exposure ends roughly three seconds
--- later, so there is a wide margin here on purpose.
-local PLAYER_LIFT = 150
+-- from the moment it is recreated, and terminal velocity is around 50 m/s, so
+-- this is roughly six seconds of margin. It used to be 150, which measured out
+-- at about two and a half seconds -- less than a cold cell load can take, and
+-- the player hit the ground and died waiting for one.
+local PLAYER_LIFT = 300
 -- How far above the camera the character must actually be before the pose is
 -- announced. Level with the lens is not behind it.
 local PERCH_MARGIN = 10
@@ -98,6 +100,12 @@ local LEAN_TOLERANCE = 4.0
 -- back spends real pixels: 2.5 keeps the kept part of a 1440-tall capture above
 -- the 512 the atlas stores.
 local MAX_PULL_BACK = 2.5
+-- Height above the framing plane below which the player is hauled back up. The
+-- margin above is generous, but a travel that never completes would still end
+-- in the ground, and being killed by the map tool is not acceptable.
+local FALL_FLOOR = 60
+-- Seconds between rescues, so one slow travel does not become a stream of them.
+local FALL_RESCUE_INTERVAL = 1.5
 -- Horizontal distance within which the character counts as having arrived.
 -- Distinct point-of-interest tiles are at least a cell apart, so this cannot be
 -- satisfied by the previous target's position.
@@ -207,7 +215,18 @@ local function enterTarget( game, index )
 		finishSweep( game )
 		return
 	end
-	local centreX, centreY = targetCentre( g_shoot.targets[index] )
+	local target = g_shoot.targets[index]
+	local centreX, centreY, metres = targetCentre( target )
+	-- Nothing here needs measuring in-game, so the shot can be framed before the
+	-- journey rather than after it. The camera then watches the tile stream in
+	-- from the position it will photograph from, instead of staring at sky from
+	-- four hundred metres for most of every cycle.
+	g_shoot.ground = target.groundHeight or 0
+	g_shoot.probed = target.groundHeight and "atlas" or "sealevel"
+	g_shoot.structure = math.max( target.reliefHeight or 0, target.structureHeight or 0 )
+	local exact = cameraHeight( metres )
+	g_shoot.lift = math.max( exact, math.min( g_shoot.structure * LEAN_TOLERANCE,
+		exact * MAX_PULL_BACK ) )
 	requestTravel( game, centreX, centreY, TRAVEL_ALTITUDE )
 	g_shoot.phase = "travel"
 end
@@ -262,6 +281,7 @@ local function shootUpdate( game, dt )
 
 	holdPose()
 	g_shoot.timer = g_shoot.timer + dt
+	g_shoot.rescueTimer = ( g_shoot.rescueTimer or 0 ) + dt
 
 	local target = g_shoot.targets[g_shoot.index]
 	if target == nil then
@@ -269,9 +289,25 @@ local function shootUpdate( game, dt )
 	end
 	local centreX, centreY, metres = targetCentre( target )
 
+	-- The player is in free fall for the whole sweep, and only the next travel
+	-- stops it. If one is slow -- a cold cell load is easily seconds -- the fall
+	-- reaches the ground and kills the player, which ends the sweep and leaves
+	-- the camera photographing sky wherever the corpse is not. Catch it.
+	local falling = localCharacter()
+	if falling and g_shoot.rescueTimer >= FALL_RESCUE_INTERVAL then
+		local floor = ( g_shoot.ground or 0 ) + ( g_shoot.lift or 0 ) + FALL_FLOOR
+		if falling:getWorldPosition().z < floor then
+			g_shoot.rescueTimer = 0
+			requestTravel( game, centreX, centreY,
+				( g_shoot.ground or 0 ) + ( g_shoot.lift or 0 ) + PLAYER_LIFT )
+			sm.log.warning( "SCRAPMAP_SHOT_V1|rescue|" .. tostring( target.uuid ) )
+		end
+	end
+
+	local height = ( g_shoot.ground or 0 ) + ( g_shoot.lift or cameraHeight( metres ) )
+	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
+
 	if g_shoot.phase == "travel" then
-		sm.camera.setPosition( sm.vec3.new( centreX, centreY,
-			TRAVEL_ALTITUDE + TRAVEL_CAMERA_LIFT ) )
 		if arrivedAt( centreX, centreY ) then
 			g_shoot.phase = "settle"
 			g_shoot.timer = 0
@@ -284,8 +320,6 @@ local function shootUpdate( game, dt )
 	end
 
 	if g_shoot.phase == "settle" then
-		sm.camera.setPosition( sm.vec3.new( centreX, centreY,
-			TRAVEL_ALTITUDE + TRAVEL_CAMERA_LIFT ) )
 		if g_shoot.timer < SCRAPMAP_SHOOT_SETTLE then
 			return
 		end

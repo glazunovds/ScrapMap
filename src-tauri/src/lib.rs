@@ -902,6 +902,12 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                                         photographed.push(uuid);
                                     }
                                     Err(error) => {
+                                        // Kept where it can be read: a rejected
+                                        // frame silently leaves the previous
+                                        // run's photograph in place.
+                                        if let Some(root) = atlas_bake::atlas_root() {
+                                            poi_capture::note_rejection(&root, &uuid, &error);
+                                        }
                                         eprintln!("ScrapMap could not photograph {uuid}: {error}")
                                     }
                                 }

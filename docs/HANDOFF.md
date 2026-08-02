@@ -94,6 +94,36 @@ A sweep still leaves the player helpless for fifteen minutes with locked
 controls. If deaths keep happening, that is the thing to attack: either shorten
 the exposure or accept `/godmode` as a documented precondition.
 
+## The run after that: the sweep completed, then the player fell
+
+`begin|116` then `done|116`, so the sweep with the fixes ran the whole map. The
+photographs confirm it: **no black bands on any of the 85 taken since**, and no
+bright featureless frame at all — the sky problem is gone from the output.
+
+83 of the 116 were accepted. The other 33 were rejected by the frame guards and
+silently kept the *previous* run's letterboxed photograph, which is why a third
+of the map still looked wrong. `remaining_targets` then offered exactly those 33
+on the next prepare, which is the resume working.
+
+Four targets into that second sweep the player fell to their death. The measured
+cause, from the telemetry trace: the perch was 150 m above the framing plane, the
+character reaches terminal velocity at about 50 m/s, and 205 m to 122 m took 2.75
+seconds. Only the *next* travel stops the fall, and a cold cell load can take
+longer than the margin. So:
+
+- the perch is now 300 m, roughly six seconds of fall;
+- a watchdog re-teleports the player whenever they drop within `FALL_FLOOR`
+  (60 m) of the framing plane, logged as `SCRAPMAP_SHOT_V1|rescue|<uuid>`.
+
+Rejections are also no longer invisible: they are appended to
+`%LOCALAPPDATA%\ScrapMap\photo-rejects.log` as `<uuid> <reason>`. Read that
+after the next run — if the 33 are being rejected for low contrast, the night
+photographs are the likely cause and `MIN_DETAIL` is the dial.
+
+The camera now also holds the final framing position during travel and settle
+rather than hovering at 440 m, so the live view is the tile streaming in rather
+than four seconds of sky per cycle.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** The fix is to rotate the captured

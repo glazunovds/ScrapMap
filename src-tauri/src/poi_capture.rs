@@ -364,6 +364,21 @@ fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Records why a frame was thrown away.
+///
+/// Rejections used to go only to stderr, which nothing reads. A sweep could
+/// therefore report `done` having quietly kept the previous run's photograph for
+/// a third of the map, and the only way to notice was to measure the images.
+pub fn note_rejection(atlas_root: &Path, uuid: &str, reason: &str) {
+    let path = atlas_root.join("photo-rejects.log");
+    let line = format!("{uuid} {reason}
+");
+    use std::io::Write;
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
 /// Points the named tiles at their photographs, so a real capture wins over the
 /// generated terrain for that tile.
 pub fn publish_photos(atlas_root: &Path, uuids: &[String]) -> Result<(), String> {
