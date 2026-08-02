@@ -176,7 +176,8 @@ recreating the character is what resets the fall, and doing it with the shutter
 open risks the pose being reapplied mid-frame. Three seconds of falling from a
 300 m perch is harmless.
 
-**Run `/godmode` before sweeping.** Four runs have now ended in a death, and the
+**God mode is now automatic** — see below. Historic note: the advice at this
+point was to run `/godmode` manually. Four runs have now ended in a death, and the
 project rules out touching health from ScrapMap itself — but the dev console is
 the user's own to use, and it is the difference between a complete set of
 photographs and a fifth attempt.
@@ -198,6 +199,27 @@ health: a sweep is fifteen minutes with the controls locked and no way to eat or
 drink, and several have now been run back to back. If the next `ready` lines show
 food or water trending to zero, that is the answer, and the fix is to shorten the
 sweep or to eat first — not to touch health, which the project rules out.
+
+## God mode, the stop command, and the knock-out
+
+`hp=0/100 breath=100/100` settled the cause: fall damage, not drowning. And the
+screenshot showed the player **knocked down** with an unreachable "E Respawn"
+prompt while the sweep carried on teleporting the body from tile to tile.
+
+Three changes:
+
+- **God mode for the duration of the sweep**, restored afterwards. `g_godMode` is
+  a plain global the game's own `/godmode` toggles, so the previous value is read
+  and put back — a player already invulnerable stays that way. This is a
+  deliberate exception to the read-only rule, agreed with the user and recorded
+  in `CLAUDE.md`.
+- **`/mapstop` in chat** ends a sweep cleanly: pose released, god mode restored,
+  player returned to where they started. Escape itself is not reachable from a
+  game script — it opens the pause menu — so chat is the hook.
+- **A knocked-out player ends the sweep** rather than being dragged around.
+
+A stopped sweep logs `SCRAPMAP_SHOT_V1|stopped|<reason>` rather than `done`, so
+ScrapMap leaves the request in place and the run stays resumable.
 
 ## Open questions
 

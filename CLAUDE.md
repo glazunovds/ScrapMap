@@ -112,7 +112,11 @@ be deleted and rebuilt; prefer fixing the generator over patching its output.
 
 - No Cheat Engine, no writes to game process memory, no DirectX hook.
 - Read-only with respect to gameplay: never touch inventory, health, crafting or
-  server-controlled state.
+  server-controlled state. **One recorded exception:** the POI photography sweep
+  turns god mode on for its duration and restores the previous value afterwards.
+  It holds the player's controls for a quarter of an hour hundreds of metres up,
+  and four runs ended with the player knocked out by the fall. Agreed with the
+  user rather than assumed; nothing else may follow it without the same.
 - Portable EXE only. No MSI/NSIS, no service, no auto-update, no listening port.
 - Do not redistribute the game's own art or scripts. `game-patch/vanilla/` is
   gitignored for this reason — it holds verbatim copies of Axolot's files as a

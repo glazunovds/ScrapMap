@@ -241,7 +241,18 @@ local function targetCentre( target )
 	return ( target.x + size * 0.5 ) * CELL, ( target.y + size * 0.5 ) * CELL, size * CELL
 end
 
-local function finishSweep( game )
+-- Asks the server to turn invulnerability on for the sweep and off afterwards.
+--
+-- A deliberate, recorded exception to ScrapMap's rule against touching
+-- server-controlled state: the sweep holds the player's controls for a quarter
+-- of an hour hundreds of metres up, which is not a fair fight, and four runs
+-- ended with the player dead. The previous value is remembered and restored, so
+-- a player who was already in god mode stays in it.
+local function requestGodMode( game, enable )
+	game.network:sendToServer( "sv_scrapMapShootGodMode", { enable = enable } )
+end
+
+local function finishSweep( game, reason )
 	-- Put the player back where the sweep found them before handing control
 	-- back, so a sweep is not a one-way trip across the map.
 	if g_shoot.origin then
@@ -250,7 +261,14 @@ local function finishSweep( game )
 	end
 	g_shoot.phase = "finished"
 	releasePose()
-	sm.log.info( "SCRAPMAP_SHOT_V1|done|" .. tostring( #g_shoot.targets ) )
+	requestGodMode( game, false )
+	-- Only a sweep that ran to the end reports done; ScrapMap clears the request
+	-- on that, and an abandoned sweep must stay resumable.
+	if reason then
+		sm.log.info( "SCRAPMAP_SHOT_V1|stopped|" .. reason )
+	else
+		sm.log.info( "SCRAPMAP_SHOT_V1|done|" .. tostring( #g_shoot.targets ) )
+	end
 end
 
 local function enterTarget( game, index )
@@ -324,8 +342,17 @@ local function shootUpdate( game, dt )
 		end
 		g_shoot.origin = character:getWorldPosition()
 		g_shoot.originDirection = character:getDirection()
+		requestGodMode( game, true )
 		holdPose()
 		enterTarget( game, 1 )
+		return
+	end
+
+	-- A player on nil health is knocked down, waiting on a Respawn prompt they
+	-- cannot reach because the sweep holds their controls. Carrying on just
+	-- teleports the body from tile to tile.
+	if type( g_stats ) == "table" and type( g_stats.hp ) == "number" and g_stats.hp <= 0 then
+		finishSweep( game, "the player was knocked out" )
 		return
 	end
 
@@ -474,8 +501,46 @@ function SurvivalGame.sv_scrapMapShootTravel( self, params )
 	} )
 end
 
+-- Server half of the god-mode exception. g_godMode is a plain global that the
+-- game's own /godmode toggles, so the previous value can be read and put back
+-- rather than blindly flipped: a player already invulnerable stays that way.
+function SurvivalGame.sv_scrapMapShootGodMode( self, params )
+	if params and params.enable then
+		if g_scrapMapPriorGodMode == nil then
+			g_scrapMapPriorGodMode = g_godMode or false
+		end
+		g_godMode = true
+	else
+		g_godMode = g_scrapMapPriorGodMode or false
+		g_scrapMapPriorGodMode = nil
+	end
+	sm.log.info( "SCRAPMAP_SHOT_V1|godmode|" .. tostring( g_godMode ) )
+end
+
 if not g_scrapMapShootInstalled then
 	local originalClientOnUpdate = SurvivalGame.client_onUpdate
+	local originalBindChatCommands = SurvivalGame.bindChatCommands
+	local originalChatCommand = SurvivalGame.cl_onChatCommand
+
+	-- An escape hatch. The sweep hides the HUD and holds the controls for a
+	-- quarter of an hour, and until now the only way out was to kill the game.
+	-- Escape itself is not reachable from a game script -- it opens the pause
+	-- menu -- but chat still is.
+	function SurvivalGame.bindChatCommands( self )
+		originalBindChatCommands( self )
+		sm.game.bindChatCommand( "/mapstop", {}, "cl_onChatCommand",
+			"Stop the ScrapMap photography sweep" )
+	end
+
+	function SurvivalGame.cl_onChatCommand( self, params )
+		if params and params[1] == "/mapstop" then
+			if g_shoot and g_shoot.phase ~= "finished" then
+				finishSweep( self, "stopped from chat" )
+			end
+			return
+		end
+		originalChatCommand( self, params )
+	end
 
 	function SurvivalGame.client_onUpdate( self, dt )
 		originalClientOnUpdate( self, dt )
