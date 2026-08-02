@@ -119,6 +119,55 @@ fn classify(set_name: &str, asset_name: &str) -> AssetKind {
     AssetKind::Other
 }
 
+/// Parses the game's JSON, which is really JSONC.
+///
+/// `farming.harvestableset` annotates its entries with `//` comments, and the
+/// game's own parser accepts them. Strict parsing silently dropped the whole
+/// file, so comments are stripped first -- outside string literals, so a `//`
+/// inside a path or value survives.
+fn parse_game_json(bytes: &[u8]) -> Option<Value> {
+    if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
+        return Some(value);
+    }
+
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut cleaned = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some(character) = characters.next() {
+        if in_string {
+            cleaned.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+            cleaned.push(character);
+            continue;
+        }
+        if character == '/' && characters.peek() == Some(&'/') {
+            for skipped in characters.by_ref() {
+                if skipped == '\n' {
+                    cleaned.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        cleaned.push(character);
+    }
+
+    serde_json::from_str(&cleaned).ok()
+}
+
 fn parse_hex_color(text: &str) -> Option<[u8; 3]> {
     let clean = text.trim().trim_start_matches('#');
     if clean.len() < 6 {
@@ -312,7 +361,7 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                 .unwrap_or_default()
                 .to_owned();
             let Ok(bytes) = fs::read(&path) else { continue };
-            let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
+            let Some(document) = parse_game_json(&bytes) else {
                 continue;
             };
             let Some(items) = document.get("harvestableList").and_then(Value::as_array) else {
@@ -356,7 +405,7 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                 .unwrap_or_default()
                 .to_owned();
             let Ok(bytes) = fs::read(&path) else { continue };
-            let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
+            let Some(document) = parse_game_json(&bytes) else {
                 continue;
             };
             let Some(assets) = document.get("assetListRenderable").and_then(Value::as_array) else {
@@ -539,6 +588,35 @@ mod tests {
         let large = harvestable_radius(AssetKind::Foliage, "harvestable_tree_large01");
         assert!(sapling < grown, "{sapling} !< {grown}");
         assert!(grown < large, "{grown} !< {large}");
+    }
+
+    #[test]
+    fn game_json_with_comments_parses() {
+        // farming.harvestableset ships exactly this shape; strict parsing
+        // dropped the whole file and its entries silently vanished.
+        let jsonc = br#"{
+            "harvestableList": [
+                {
+                    "uuid": "abc", // blueberry
+                    "name": "hvs_farming_blueberry" //the bush
+                }
+            ]
+        }"#;
+        let value = parse_game_json(jsonc).expect("comments must be tolerated");
+        assert_eq!(value["harvestableList"][0]["uuid"], "abc");
+    }
+
+    #[test]
+    fn a_double_slash_inside_a_string_is_not_a_comment() {
+        let jsonc = br#"{ "path": "$SURVIVAL_DATA//Terrain/x.obj", "n": 1 }"#;
+        let value = parse_game_json(jsonc).expect("valid json");
+        assert_eq!(value["path"], "$SURVIVAL_DATA//Terrain/x.obj");
+        assert_eq!(value["n"], 1);
+    }
+
+    #[test]
+    fn irrecoverable_json_still_returns_none() {
+        assert!(parse_game_json(b"{ not json at all ").is_none());
     }
 
     #[test]
