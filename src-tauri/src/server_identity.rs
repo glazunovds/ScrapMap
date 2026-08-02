@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{self, Read},
+    io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
@@ -12,7 +12,15 @@ use sha2::{Digest, Sha256};
 /// The identity probe is deliberately not a general-purpose log reader. A
 /// larger file is rejected instead of allocating an unbounded buffer or
 /// returning an identity derived from a truncated connection history.
-pub const MAX_GAME_LOG_BYTES: u64 = 4 * 1024 * 1024;
+/// Ceiling on a game log the probe will look at.
+///
+/// This was 4 MiB, which a normal session stays well under -- but an hour of POI
+/// photography writes telemetry four times a second and pushed one log to 62 MB.
+/// The probe then failed closed on every poll, the world never got an identity,
+/// and the profile stayed quarantined: no position, no fog. The log is streamed
+/// rather than read into memory, so the only reason for a limit at all is to
+/// refuse something absurd.
+pub const MAX_GAME_LOG_BYTES: u64 = 512 * 1024 * 1024;
 
 const MAX_PID_SCAN_LINES: usize = 64;
 const LOG_FILE_PREFIX: &str = "game-";
@@ -275,55 +283,95 @@ fn is_game_log_name(name: &str) -> bool {
 }
 
 fn probe_log_file(path: &Path, expected_pid: u32) -> ServerIdentityProbe {
-    let mut file = match File::open(path) {
+    let file = match File::open(path) {
         Ok(file) => file,
         Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::LogUnreadable),
     };
-    let size = match file.metadata() {
-        Ok(metadata) => metadata.len(),
-        Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::LogUnreadable),
-    };
-    if size > MAX_GAME_LOG_BYTES {
-        return ServerIdentityProbe::unknown(ServerIdentityIssue::LogTooLarge);
-    }
-
-    let mut bytes = Vec::with_capacity(size as usize);
-    if read_bounded(&mut file, &mut bytes).is_err() {
-        return ServerIdentityProbe::unknown(ServerIdentityIssue::LogUnreadable);
-    }
-    let text = match std::str::from_utf8(&bytes) {
-        Ok(text) => text,
-        Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::InvalidUtf8),
-    };
-
-    match process_id_from_header(text) {
-        Some(pid) if pid == expected_pid => {}
-        Some(_) => {
-            return ServerIdentityProbe::unknown(ServerIdentityIssue::ProcessIdMismatch);
+    match file.metadata() {
+        Ok(metadata) if metadata.len() > MAX_GAME_LOG_BYTES => {
+            return ServerIdentityProbe::unknown(ServerIdentityIssue::LogTooLarge)
         }
-        None => return ServerIdentityProbe::unknown(ServerIdentityIssue::MissingProcessId),
+        Ok(_) => {}
+        Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::LogUnreadable),
     }
 
     let Some(log_name) = path
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| is_game_log_name(name))
+        .map(str::to_owned)
     else {
         return ServerIdentityProbe::unknown(ServerIdentityIssue::NoGameLog);
     };
 
-    connection_identity(text, log_name)
-}
+    // Streamed a line at a time. These logs grow without bound while the game
+    // runs, so holding one in memory is not an option, and the identity only
+    // depends on the header and the last connection line anyway.
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    let mut header_id = None;
+    let mut header_lines = 0;
+    let mut latest: Option<(ConnectionTarget, usize, usize)> = None;
+    let mut line_index = 0_usize;
+    let mut byte_offset = 0_usize;
 
-fn read_bounded(file: &mut File, destination: &mut Vec<u8>) -> io::Result<()> {
-    file.take(MAX_GAME_LOG_BYTES + 1).read_to_end(destination)?;
-    if destination.len() as u64 > MAX_GAME_LOG_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "game log exceeded the configured limit while it was read",
-        ));
+    loop {
+        buffer.clear();
+        let read = match reader.read_until(b'\n', &mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::LogUnreadable),
+        };
+        let segment = match std::str::from_utf8(&buffer) {
+            Ok(segment) => segment,
+            Err(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::InvalidUtf8),
+        };
+
+        // A line without its terminator is still being written. Half a
+        // connection line must not be read as a connection to somewhere else.
+        if !segment.ends_with('\n') {
+            if segment.contains(NETWORK_CONNECT_MARKER) {
+                return ServerIdentityProbe::unknown(ServerIdentityIssue::IncompleteConnectionLine);
+            }
+            break;
+        }
+
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if header_id.is_none() && header_lines < MAX_PID_SCAN_LINES {
+            header_lines += 1;
+            header_id = process_id_from_line(line);
+        }
+        if let Some(target) = connection_target(line) {
+            latest = Some((target, line_index, byte_offset));
+        }
+        byte_offset += read;
+        line_index += 1;
     }
-    Ok(())
+
+    match header_id {
+        Some(pid) if pid == expected_pid => {}
+        Some(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::ProcessIdMismatch),
+        None => return ServerIdentityProbe::unknown(ServerIdentityIssue::MissingProcessId),
+    }
+
+    match latest {
+        Some((ConnectionTarget::Local, line_index, line_offset)) => {
+            ServerIdentityProbe::known(ServerIdentity::local(), &log_name, line_index, line_offset)
+        }
+        Some((ConnectionTarget::Peer(stable_id), line_index, line_offset)) => {
+            ServerIdentityProbe::known(
+                ServerIdentity::peer_hosted(stable_id),
+                &log_name,
+                line_index,
+                line_offset,
+            )
+        }
+        Some((ConnectionTarget::Invalid, _, _)) => {
+            ServerIdentityProbe::unknown(ServerIdentityIssue::InvalidConnectionIdentity)
+        }
+        None => ServerIdentityProbe::unknown(ServerIdentityIssue::NoConnectionIdentity),
+    }
 }
 
 fn process_id_from_header(text: &str) -> Option<u32> {
@@ -343,51 +391,6 @@ fn process_id_from_line(line: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-fn connection_identity(text: &str, log_name: &str) -> ServerIdentityProbe {
-    let has_incomplete_final_line = !text.is_empty() && !text.ends_with('\n');
-    let complete_text = if has_incomplete_final_line {
-        text.rsplit_once('\n').map_or("", |(complete, _)| complete)
-    } else {
-        text
-    };
-
-    let mut latest = None;
-    let mut byte_offset = 0;
-    for (line_index, segment) in complete_text.split_inclusive('\n').enumerate() {
-        let line_offset = byte_offset;
-        byte_offset += segment.len();
-        let line = segment.strip_suffix('\n').unwrap_or(segment);
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if let Some(target) = connection_target(line) {
-            latest = Some((target, line_index, line_offset));
-        }
-    }
-
-    if has_incomplete_final_line {
-        let incomplete = text.rsplit_once('\n').map_or(text, |(_, line)| line);
-        if incomplete.contains(NETWORK_CONNECT_MARKER) {
-            return ServerIdentityProbe::unknown(ServerIdentityIssue::IncompleteConnectionLine);
-        }
-    }
-
-    match latest {
-        Some((ConnectionTarget::Local, line_index, line_offset)) => {
-            ServerIdentityProbe::known(ServerIdentity::local(), log_name, line_index, line_offset)
-        }
-        Some((ConnectionTarget::Peer(stable_id), line_index, line_offset)) => {
-            ServerIdentityProbe::known(
-                ServerIdentity::peer_hosted(stable_id),
-                log_name,
-                line_index,
-                line_offset,
-            )
-        }
-        Some((ConnectionTarget::Invalid, _, _)) => {
-            ServerIdentityProbe::unknown(ServerIdentityIssue::InvalidConnectionIdentity)
-        }
-        None => ServerIdentityProbe::unknown(ServerIdentityIssue::NoConnectionIdentity),
-    }
-}
 
 enum ConnectionTarget {
     Local,
