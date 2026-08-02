@@ -140,7 +140,38 @@ Every photograph taken before this exists predates the state file, so the next
 sweep is a full 116 by design. After that, resuming should offer only what is
 genuinely missing.
 
-## The death, still not explained
+## The death, measured at last
+
+The stat logging paid for itself on the first run. Across six targets:
+
+```
+hp=30 … hp=30 … hp=30 … hp=30 … hp=0 … hp=30
+```
+
+Steady, then zero, then restored by the respawn. **Not a drain — one lethal
+event.** And `food` and `water` came back `nil` because this build has no hunger
+or thirst at all; the stats are `hp`, `maxhp`, `breath`, `maxbreath`. Starvation
+is ruled out, and the logging now reports breath instead.
+
+Breath matters because the height trace for that run contains `z=3` and `z=9`.
+The player reached the ground, or the water. **With the sweep holding their
+controls they cannot swim up**, so a landing in water is unrecoverable.
+
+Three rescues fired in six targets, so falls were reaching the floor
+routinely — the watchdog is doing its job but was tuned too tight: 60 m of margin
+checked every 1.5 s is 75 m of fall between checks at terminal velocity, and the
+rescue itself has to load a cell before it takes effect. Now 120 m, checked every
+0.5 s.
+
+The gap that lets it happen at all is between targets: the fall from the previous
+perch continues while the next travel's cell load is pending.
+
+**Run `/godmode` before sweeping.** Four runs have now ended in a death, and the
+project rules out touching health from ScrapMap itself — but the dev console is
+the user's own to use, and it is the difference between a complete set of
+photographs and a fifth attempt.
+
+## Superseded: the death, guessed at
 
 Three runs have now ended with the player dead. The fall watchdog works -- one
 `rescue` fired on the 8-cell tile, and clearance reads 295.8 -- but a death still

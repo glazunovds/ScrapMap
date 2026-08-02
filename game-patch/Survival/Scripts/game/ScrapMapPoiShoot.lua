@@ -100,12 +100,14 @@ local LEAN_TOLERANCE = 4.0
 -- back spends real pixels: 2.5 keeps the kept part of a 1440-tall capture above
 -- the 512 the atlas stores.
 local MAX_PULL_BACK = 2.5
--- Height above the framing plane below which the player is hauled back up. The
--- margin above is generous, but a travel that never completes would still end
--- in the ground, and being killed by the map tool is not acceptable.
-local FALL_FLOOR = 60
+-- Height above the framing plane below which the player is hauled back up.
+--
+-- Generous on purpose, and checked often: at terminal velocity the player covers
+-- 25 m between checks, and the rescue itself has to load a cell before it takes
+-- effect. Catching the fall at 120 m rather than 60 leaves time for both.
+local FALL_FLOOR = 120
 -- Seconds between rescues, so one slow travel does not become a stream of them.
-local FALL_RESCUE_INTERVAL = 1.5
+local FALL_RESCUE_INTERVAL = 0.5
 -- Horizontal distance within which the character counts as having arrived.
 -- Distinct point-of-interest tiles are at least a cell apart, so this cannot be
 -- satisfied by the previous target's position.
@@ -141,8 +143,12 @@ local function statsText()
 	if type( g_stats ) ~= "table" then
 		return "?"
 	end
-	return string.format( "hp=%s food=%s water=%s",
-		tostring( g_stats.hp ), tostring( g_stats.food ), tostring( g_stats.water ) )
+	-- This build has no hunger or thirst: the stats are hp and breath. Breath is
+	-- the one that matters here -- a player who lands in water with the sweep
+	-- holding their controls cannot swim up.
+	return string.format( "hp=%s/%s breath=%s/%s",
+		tostring( g_stats.hp ), tostring( g_stats.maxhp ),
+		tostring( g_stats.breath ), tostring( g_stats.maxbreath ) )
 end
 
 -- Height at which a tile of `metres` across exactly fills the frame vertically.
