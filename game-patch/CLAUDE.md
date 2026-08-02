@@ -5,7 +5,7 @@ copies; `tools/game-patch.mjs` installs them and can put the game back.
 
 ```
 Survival/Scripts/game/ScrapMapTelemetry.lua     player positions -> game log
-Survival/Scripts/game/ScrapMapPoiShoot.lua      camera sweep for POI photography
+Survival/Scripts/game/ScrapMapPoiShoot.lua      teleport + camera POI photography sweep
 Survival/Scripts/terrain/ScrapMapLayoutExport.lua   world layout -> JSON
 Survival/Scripts/terrain/ScrapMapAtlasBake.lua      terrain sampling -> per-tile JSON
 vanilla/                                        restore baseline, gitignored
@@ -39,6 +39,11 @@ gitignored — it is their source, not ours — and is recreated locally with
 `g_scrapMap...Installed` so re-execution is a no-op. The cost is that editing an
 addon requires a full game restart; reloading the world re-runs the file but the
 old closure stays installed.
+
+Only *wrapping* an existing function needs that guard — do it twice and the
+behaviour compounds. Plain assignment does not, so
+`SurvivalGame.sv_scrapMapShootTravel` is defined outside the guard: a method the
+sweep depends on must not be skipped just because the file ran before.
 
 **`sm.json.fileExists` cannot see files written during the same session.** Do
 not use it to detect a request file or to check whether output already exists.

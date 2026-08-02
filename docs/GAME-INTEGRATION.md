@@ -148,23 +148,73 @@ The handshake is one-way by necessity. `sm.json.fileExists` cannot see files
 written during the same session, so Lua can neither be signalled mid-sweep nor
 poll for an acknowledgement. Instead Lua announces each pose in the log and
 holds it for a fixed dwell; ScrapMap captures inside that window. For the same
-reason the request file is written for a later world load rather than the
+reason the request file is picked up on the next world load rather than the
 running one.
 
-### Status: does not work yet
+### The camera is not enough — the player has to travel
 
-**Terrain streams around the player, not the camera.** Moving the camera to a
-distant POI shows sky, because nothing has loaded there. In a full 116-target
-sweep roughly half the frames were skybox — and they are not detectable by
-brightness, since sky is bright and has plenty of contrast.
+**Terrain streams around the player, not the camera.** A camera-only sweep
+photographs sky wherever the player is not; in a 116-target run roughly half the
+frames came back as skybox, and they are not detectable by brightness, because
+sky is bright and full of contrast.
 
-Fixing this needs the *player* to move, which is what the older AutoHotkey tools
-did with the dev console's `/tp`. There is no character-teleport in the survival
-Lua: `/unstuck` kills and respawns rather than moving you. Options are recorded
-in `ROADMAP.md`; opportunistic capture during normal play is the cheapest.
+So the sweep moves the player as well, using the game's own travel path rather
+than anything invented:
 
-Everything else in the pipeline works and is tested: target selection, the
-one-way handshake, window capture, cropping, rescaling and manifest precedence.
+```lua
+sm.event.sendToGame( "sv_e_recreatePlayerInWorld",
+    { player = player, world = world, pos = pos, dir = dir } )
+```
+
+`SurvivalGame.sv_e_recreatePlayerInWorld` calls
+`world:loadCell( x, y, player, "sv_recreatePlayerCharacter", … )` — it **loads
+the destination cell first** and recreates the character in the load callback.
+That is precisely the guarantee a camera cannot give itself. It is the same path
+warehouse ejection and the underground elevators use.
+
+No shipped script calls it, so its parameter contract is read off its body: a
+`pos` and a normalised `dir` (`sv_recreatePlayerCharacter` takes
+`math.asin( dir.z )`, so an unnormalised vector is a silent NaN), a `world`, and
+the `player`. `fadeFromBlack` is deliberately left unset — a fade would be in
+the photograph.
+
+Only the server may recreate a character, so the client half asks for each move
+over `network:sendToServer( "sv_scrapMapShootTravel", … )`.
+
+**Two hops per target.** The first drops the player in at 400 m above the tile,
+which forces the cell to load and lets its neighbours stream. Only then does a
+downward raycast have anything to hit, and the second hop stands the player on
+the measured ground. Recreating the character resets its velocity, so the long
+fall never lands and there is no fall damage.
+
+Details that each cost a debugging round:
+
+- The ground probe is filtered to `sm.physics.filter.terrainSurface`. Unfiltered,
+  a cast from 800 m down hits the falling character first and frames the shot
+  around it.
+- The player stands at the tile's centre, which is the middle of the frame, so
+  the character is hidden with `setVisible( false )` for the exposure.
+- A recreated character brings back the HUD, the player's controls and the
+  default camera. The pose is re-applied whenever the character identity
+  changes, not once at the start.
+- The sweep refuses to run when `sm.isHost` is `false`. Teleporting yourself
+  around someone else's server for ten minutes is not a neighbourly default.
+- Arrival is detected by the character's horizontal distance to the target, with
+  a timeout so one stuck target cannot stall the sweep.
+- At the end the player is returned to where the sweep found them.
+
+Roughly seven seconds per target, so a 116-target world takes about fifteen
+minutes. The character stands still on the ground for two of those seconds per
+target and **can be attacked** — hostile robots do not care that a photograph is
+in progress. Run the sweep somewhere quiet, or with `/godmode` on.
+
+Tile sizes in the test world run 1, 2, 4 and 8 cells (68 / 28 / 16 / 4 of them).
+An 8-cell tile is 512 m across and the camera sits 443 m up, which asks for more
+ground than streams around a standing player; expect the four largest tiles to
+be the ones that come back partly sky.
+
+Everything downstream is unchanged and tested: target selection, the one-way
+handshake, window capture, cropping, rescaling and manifest precedence.
 
 ## Reference
 

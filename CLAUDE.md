@@ -74,7 +74,9 @@ field, not a null one.
 
 **Terrain streams around the player, not the camera.** Moving the camera alone
 shows sky wherever the player is not. This is why the POI photography sweep only
-worked near the player.
+worked near the player, and why it now teleports the player too, via
+`SurvivalGame.sv_e_recreatePlayerInWorld` — the game's own travel path, which
+loads the destination cell *before* recreating the character there.
 
 **`BitBlt` returns pure black on the game window** because it is
 DirectX-presented. `PrintWindow` with `PW_RENDERFULLCONTENT` returns a real

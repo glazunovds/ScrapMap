@@ -9,7 +9,8 @@ icons, search and filters, live local-player telemetry, and a procedurally
 generated tile atlas covering all 493 tiles with terrain, ground cover, water,
 hillshading, buildings and forest.
 
-Not working: shared fog and markers, and POI photography.
+Not working: shared fog and markers. POI photography is implemented but has not
+yet been run end to end in the game.
 
 ## Done
 
@@ -45,27 +46,24 @@ its own category and off by default.
 
 ### POI photography
 
-Blocked, and the blocker is real: terrain streams around the player, not the
-camera, so a camera-only sweep photographs sky wherever the player is not. About
-half of a 116-target sweep came back as skybox.
+The blocker was real — terrain streams around the player, not the camera, so a
+camera-only sweep photographed sky wherever the player was not, and about half a
+116-target run came back as skybox.
 
-Options, cheapest first:
+The way out was the game's own teleport. `SurvivalGame.sv_e_recreatePlayerInWorld`
+loads the destination cell and *then* recreates the character in the load
+callback, so the sweep now moves the player and the camera together. Two hops
+per target: in high to force the cell to load, then down onto the measured
+ground for the exposure. `GAME-INTEGRATION.md` has the details.
 
-1. **Opportunistic capture.** No sweep. Notice when the player is near an
-   un-photographed POI during normal play and capture then. No teleporting, no
-   locked controls, no vulnerability while the character stands still. Fills in
-   gradually and only covers places actually visited.
-2. **Player teleport.** What the older AutoHotkey tools did with the dev
-   console's `/tp`. There is no character-move API in the survival Lua —
-   `/unstuck` kills and respawns rather than moving you — so this needs either
-   an undocumented API (`character:setWorldPosition` may exist even though no
-   shipped script uses it) or a way to reach the dev console.
-3. **Manual repositioning.** Sweep only POIs within streaming range of where the
-   player stands, then move and run it again.
-4. **Drop it.** The procedural atlas already covers every POI, schematically.
+**Not yet verified in the game.** What remains is to run it: check the hit rate,
+confirm the player is returned to their starting position, and see whether two
+seconds standing still per target is survivable in a populated world.
 
-Everything downstream of the camera works and is tested: target selection, the
-one-way handshake, window capture, cropping, rescaling and manifest precedence.
+If the sweep turns out to be too disruptive, opportunistic capture during normal
+play remains the cheap alternative — notice when the player happens to be near
+an un-photographed POI and capture then, with no teleporting and no locked
+controls. It only covers places actually visited.
 
 ### Shared fog and markers
 
