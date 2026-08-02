@@ -40,6 +40,7 @@ const ADDON_FILES = [
   "Survival/Scripts/terrain/ScrapMapAtlasBake.lua",
   "Survival/Scripts/terrain/ScrapMapLayoutExport.lua",
   "Survival/Scripts/game/ScrapMapTelemetry.lua",
+  "Survival/Scripts/game/ScrapMapPoiShoot.lua",
 ];
 
 /**
@@ -50,7 +51,10 @@ const ADDON_FILES = [
 const INJECTIONS = [
   {
     file: "Survival/Scripts/game/SurvivalGame.lua",
-    body: `dofile( "$SURVIVAL_DATA/Scripts/game/ScrapMapTelemetry.lua" )`,
+    body: [
+      `dofile( "$SURVIVAL_DATA/Scripts/game/ScrapMapTelemetry.lua" )`,
+      `dofile( "$SURVIVAL_DATA/Scripts/game/ScrapMapPoiShoot.lua" )`,
+    ].join("\n"),
   },
   {
     file: "Survival/Scripts/terrain/terrain_overworld.lua",

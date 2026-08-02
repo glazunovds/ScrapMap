@@ -1481,6 +1481,26 @@
     });
   });
 
+  window.addEventListener("sm-minimap:poi-capture", () => {
+    const note = document.getElementById("poiCaptureNote");
+    const button = document.getElementById("poiCaptureButton");
+    if (button) button.disabled = true;
+    invoke("poi_capture_prepare")
+      .then((result) => {
+        if (note) {
+          note.textContent =
+            `Подготовлено объектов: ${result?.targets ?? 0}. ` +
+            "Перезагрузите мир, чтобы начать съёмку.";
+        }
+      })
+      .catch((error) => {
+        if (note) note.textContent = `Не удалось подготовить съёмку: ${error}`;
+      })
+      .finally(() => {
+        if (button) button.disabled = false;
+      });
+  });
+
   window.addEventListener("sm-minimap:fog-delta", (event) => {
     const job = currentMutationTarget(event.detail, true);
     if (!job) {

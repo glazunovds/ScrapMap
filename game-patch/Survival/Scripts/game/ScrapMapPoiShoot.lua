@@ -1,0 +1,134 @@
+-- ScrapMap POI photography sweep.
+--
+-- Points the camera straight down at each point of interest in turn and holds
+-- it still long enough for ScrapMap to capture the window. The result is a real
+-- top-down photograph of the crash site, warehouses, ruins and so on, which the
+-- procedural atlas cannot produce because it only samples terrain.
+--
+-- The handshake is deliberately one-way. Lua logs that it is in position and
+-- then holds the pose for a fixed dwell; ScrapMap watches the log and captures
+-- during that window. Lua cannot check for an acknowledgement file, because
+-- sm.json.fileExists does not see files written during the same session.
+--
+-- Enabling: ScrapMap writes ScrapMapCapture.json before the game starts, since
+-- for the same reason a file created mid-session would be invisible. ScrapMap
+-- removes it once the sweep is done, so it runs once rather than every load.
+
+SCRAPMAP_SHOOT_VERSION = 1
+
+-- Seconds to hold each pose. Covers terrain streaming plus ScrapMap's poll and
+-- capture; the log line is emitted at the start so the capture lands mid-dwell.
+SCRAPMAP_SHOOT_DWELL = 3.0
+-- Vertical field of view used for every shot. Fixed so that every tile is
+-- framed identically and the captured square maps to a known ground distance.
+SCRAPMAP_SHOOT_FOV = 60.0
+
+local REQUEST_PATH = "$SURVIVAL_DATA/ScrapMapCapture.json"
+local CELL = 64
+
+local g_shoot = nil
+
+-- Height at which a tile of `metres` across exactly fills the frame vertically.
+-- The captured square is the centre of the client area, so its side covers the
+-- same ground distance on both axes.
+local function cameraHeight( metres )
+	local halfFov = math.rad( SCRAPMAP_SHOOT_FOV ) * 0.5
+	return ( metres * 0.5 ) / math.tan( halfFov )
+end
+
+local function shootLoad()
+	if not sm.json.fileExists( REQUEST_PATH ) then
+		return
+	end
+	local ok, request = pcall( sm.json.open, REQUEST_PATH )
+	if not ok or type( request ) ~= "table" or type( request.targets ) ~= "table" then
+		sm.log.warning( "SCRAPMAP_SHOT_V1|error|capture request is unreadable" )
+		return
+	end
+
+	g_shoot = {
+		targets = request.targets,
+		index = 0,
+		timer = 0,
+		announced = false
+	}
+	sm.log.info( "SCRAPMAP_SHOT_V1|begin|" .. tostring( #request.targets ) )
+end
+
+-- Drives the sweep from the client update, alongside the telemetry provider.
+local function shootUpdate( dt )
+	if g_shoot == nil then
+		return
+	end
+
+	if g_shoot.index > #g_shoot.targets then
+		return
+	end
+
+	if g_shoot.index == 0 then
+		-- Take the camera before the first shot and keep it for the sweep.
+		g_shoot.index = 1
+		g_shoot.timer = 0
+		g_shoot.announced = false
+		sm.gui.hideGui( true )
+		sm.localPlayer.setLockedControls( true )
+		sm.camera.setCameraState( sm.camera.state.cutsceneTP )
+		sm.render.setCinematic( true )
+	end
+
+	local target = g_shoot.targets[g_shoot.index]
+	if target == nil then
+		return
+	end
+
+	local size = target.size or 1
+	local metres = size * CELL
+	-- Cell coordinates address the cell's corner, so aim at the tile's middle.
+	local centreX = ( target.x + size * 0.5 ) * CELL
+	local centreY = ( target.y + size * 0.5 ) * CELL
+	local height = ( target.groundHeight or 0 ) + cameraHeight( metres )
+
+	sm.camera.setFov( SCRAPMAP_SHOOT_FOV )
+	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
+	sm.camera.setDirection( sm.vec3.new( 0, 0, -1 ) )
+
+	if not g_shoot.announced then
+		g_shoot.announced = true
+		sm.log.info( string.format(
+			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f",
+			tostring( target.uuid ), target.x, target.y, size, metres ) )
+	end
+
+	g_shoot.timer = g_shoot.timer + dt
+	if g_shoot.timer >= SCRAPMAP_SHOOT_DWELL then
+		g_shoot.timer = 0
+		g_shoot.announced = false
+		g_shoot.index = g_shoot.index + 1
+		if g_shoot.index > #g_shoot.targets then
+			sm.gui.hideGui( false )
+			sm.localPlayer.setLockedControls( false )
+			sm.camera.setCameraState( sm.camera.state.default )
+			sm.render.setCinematic( false )
+			sm.log.info( "SCRAPMAP_SHOT_V1|done|" .. tostring( #g_shoot.targets ) )
+		end
+	end
+end
+
+if not g_scrapMapShootInstalled then
+	local originalClientOnUpdate = SurvivalGame.client_onUpdate
+
+	function SurvivalGame.client_onUpdate( self, dt )
+		originalClientOnUpdate( self, dt )
+
+		-- The request is read once, on the first client frame: by then the world
+		-- exists, and re-reading it every frame would be pointless work.
+		if not self.cl.scrapMapShootChecked then
+			self.cl.scrapMapShootChecked = true
+			shootLoad()
+		end
+		shootUpdate( dt )
+	end
+
+	g_scrapMapShootInstalled = true
+	sm.log.info( "SCRAPMAP_SHOT_V1|installed" )
+end

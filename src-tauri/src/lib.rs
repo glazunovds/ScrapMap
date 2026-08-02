@@ -5,15 +5,17 @@ mod game_build;
 mod game_log_source;
 mod game_window;
 mod native_process;
+mod poi_capture;
 mod server_identity;
 mod storage;
 mod tile_atlas;
+mod window_capture;
 
 use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering},
         Mutex,
     },
     thread,
@@ -62,6 +64,9 @@ struct OverlayState {
     /// game's own HUD without rebuilding.
     mini_size: AtomicU32,
     mini_corner: AtomicU32,
+    /// The game's top-level window, so POI photography can capture it without
+    /// re-discovering it on another thread.
+    game_window_handle: AtomicI64,
 }
 
 #[derive(Default)]
@@ -123,6 +128,7 @@ impl Default for OverlayState {
             game_process_id: AtomicU32::new(0),
             mini_size: AtomicU32::new(DEFAULT_MINI_LOGICAL_SIZE),
             mini_corner: AtomicU32::new(1),
+            game_window_handle: AtomicI64::new(0),
         }
     }
 }
@@ -326,6 +332,12 @@ fn synchronize_with_game_locked(
             .map_or(0, |game| game.identity.process_id),
         Ordering::Release,
     );
+    state.game_window_handle.store(
+        poll.game
+            .as_ref()
+            .map_or(0, |game| game.identity.handle.0 as i64),
+        Ordering::Release,
+    );
     let expanded = state.expanded.load(Ordering::Acquire);
     let overlay = overlay_identity(window);
 
@@ -406,6 +418,42 @@ fn set_mini_overlay_layout(
         .store(size.clamp(200, 900), Ordering::Release);
     state.mini_corner.store(corner, Ordering::Release);
     Ok(())
+}
+
+
+/// Prepares a POI photography sweep.
+///
+/// Writes the target list where Lua will find it. It cannot be picked up
+/// mid-session -- sm.json.fileExists does not see files written after the game
+/// started -- so the sweep begins on the next world load.
+#[tauri::command]
+fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Value, String> {
+    let process_id = state.game_process_id.load(Ordering::Acquire);
+    let Some(log_directory) = (process_id != 0)
+        .then(|| game_log_directory(process_id))
+        .flatten()
+    else {
+        return Err("Scrap Mechanic is not running".to_owned());
+    };
+    let game_root = log_directory
+        .parent()
+        .ok_or("could not locate the game directory")?;
+
+    let layout_path = game_root.join("Survival").join("ScrapMapLayout.json");
+    let bytes = fs::read(&layout_path)
+        .map_err(|_| "no world layout yet -- load a survival world first".to_owned())?;
+    let layout: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| format!("layout is invalid: {error}"))?;
+
+    let targets = poi_capture::build_targets(&layout);
+    if targets.is_empty() {
+        return Err("this world has no points of interest to photograph".to_owned());
+    }
+    poi_capture::write_request(game_root, &targets)?;
+    Ok(serde_json::json!({
+        "targets": targets.len(),
+        "note": "reload the survival world to run the sweep",
+    }))
 }
 
 #[tauri::command]
@@ -777,6 +825,8 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                 }
             };
             let mut game_log_source = GameLogSource::default();
+            let mut shot_watcher = poi_capture::ShotWatcher::default();
+            let mut photographed: Vec<String> = Vec::new();
             let mut last_error = None;
 
             loop {
@@ -794,6 +844,54 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                         .then(|| game_log_directory(process_id))
                         .flatten(),
                 );
+                // A POI sweep announces each pose in the same log, and holds it
+                // long enough for the capture to land inside the dwell.
+                if let Some(directory) = (process_id != 0)
+                    .then(|| game_log_directory(process_id))
+                    .flatten()
+                {
+                    let window = app
+                        .state::<OverlayState>()
+                        .game_window_handle
+                        .load(Ordering::Acquire) as isize;
+                    for event in shot_watcher.poll(&directory) {
+                        match event {
+                            poi_capture::ShotEvent::Ready { uuid, .. } if window != 0 => {
+                                // Let the scene finish streaming before looking.
+                                thread::sleep(Duration::from_millis(1_200));
+                                match atlas_bake::atlas_root()
+                                    .ok_or_else(|| "LOCALAPPDATA is not set".to_owned())
+                                    .and_then(|root| {
+                                        poi_capture::capture_tile(window, &uuid, &root)
+                                    }) {
+                                    Ok(_) => photographed.push(uuid),
+                                    Err(error) => {
+                                        eprintln!("ScrapMap could not photograph {uuid}: {error}")
+                                    }
+                                }
+                            }
+                            poi_capture::ShotEvent::Ready { .. } => {}
+                            poi_capture::ShotEvent::Finished => {
+                                if let Some(root) = atlas_bake::atlas_root() {
+                                    if let Err(error) =
+                                        poi_capture::publish_photos(&root, &photographed)
+                                    {
+                                        eprintln!("ScrapMap could not publish photos: {error}");
+                                    }
+                                }
+                                if let Some(game_root) = directory.parent() {
+                                    poi_capture::clear_request(game_root);
+                                }
+                                println!(
+                                    "ScrapMap photographed {} points of interest",
+                                    photographed.len()
+                                );
+                                photographed.clear();
+                            }
+                        }
+                    }
+                }
+
                 let game_log_snapshot = game_log_source.poll().map(Box::new);
                 let poll = game_log_snapshot
                     .map(DiagnosticPoll::Updated)
@@ -928,6 +1026,7 @@ pub fn run() {
             diagnostic_status,
             game_layout_snapshot,
             atlas_bake_refresh,
+            poi_capture_prepare,
             server_identity_probe,
             game_build_probe,
             native_transport_probe,

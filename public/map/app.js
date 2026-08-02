@@ -252,6 +252,8 @@
     hideAllPoiButton: document.getElementById("hideAllPoiButton"),
     fogToggle: document.getElementById("fogToggle"),
     revealAllButton: document.getElementById("revealAllButton"),
+    poiCaptureButton: document.getElementById("poiCaptureButton"),
+    poiCaptureNote: document.getElementById("poiCaptureNote"),
     miniCornerSelect: document.getElementById("miniCornerSelect"),
     miniSizeSelect: document.getElementById("miniSizeSelect"),
     expandButton: document.getElementById("expandButton"),
@@ -2732,6 +2734,12 @@
 
   elements.revealAllButton?.addEventListener("click", () => {
     revealAllCells();
+  });
+
+  elements.poiCaptureButton?.addEventListener("click", () => {
+    // Preparing the sweep is a native concern: it writes a request the game
+    // reads on its next world load.
+    window.dispatchEvent(new CustomEvent("sm-minimap:poi-capture"));
   });
 
   // The compact map's placement is a property of this machine's screen and the
