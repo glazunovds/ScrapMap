@@ -14,9 +14,18 @@
 --
 -- Each target is visited in two hops. The first drops the player in high above
 -- the tile, which forces the cell to load and lets its neighbours stream in.
--- Only then can a downward raycast find the ground, and the second hop stands
--- the player on it. Recreating the character resets its velocity, so the long
--- fall never lands and there is no fall damage.
+-- Only then can a downward raycast find the ground, and the second hop puts the
+-- player at a known height above it -- specifically, above the camera.
+--
+-- Above the camera on purpose. The camera looks straight down, so a player
+-- higher than it is outside the frame no matter how the view is cropped, and a
+-- player a hundred and fifty metres up is out of reach of everything that would
+-- like to kill it. The first version of this stood the player on the ground at
+-- the tile's centre, which put a falling character in the middle of every
+-- photograph and fed it to a warehouse full of robots.
+--
+-- Recreating the character resets its velocity, so the fall never accumulates
+-- and never lands: each hop starts it again from zero.
 --
 -- The handshake with ScrapMap is deliberately one-way. Lua logs that it is in
 -- position and holds the pose for a fixed dwell; ScrapMap watches the log and
@@ -27,7 +36,7 @@
 -- next world load, which is when this file next looks for it. ScrapMap removes
 -- the file once the sweep reports done, so it runs once rather than every load.
 
-SCRAPMAP_SHOOT_VERSION = 2
+SCRAPMAP_SHOOT_VERSION = 3
 
 -- Seconds to hold the framed pose. Covers ScrapMap's poll and capture; the log
 -- line is emitted at the start so the capture lands mid-dwell.
@@ -35,9 +44,10 @@ SCRAPMAP_SHOOT_DWELL = 2.0
 -- Seconds spent hovering after arrival, so the cells around the destination
 -- stream in before the ground is measured and the shot is framed.
 SCRAPMAP_SHOOT_SETTLE = 2.5
--- Seconds allowed for the second hop to put the character on the ground, and
--- for whatever only streams once the player is standing on it to arrive.
-SCRAPMAP_SHOOT_LANDING = 1.5
+-- Seconds to let the second hop settle before the pose is announced, and how
+-- long to keep waiting for the character to actually be above the camera.
+SCRAPMAP_SHOOT_PERCH = 1.0
+SCRAPMAP_SHOOT_PERCH_TIMEOUT = 5.0
 -- Give up waiting for a travel to complete after this long and carry on. A
 -- stalled target must not stall the whole sweep; ScrapMap's own frame guards
 -- reject the shot if the scene never arrived.
@@ -57,7 +67,16 @@ local TRAVEL_ALTITUDE = 400
 -- How high above the camera hovers during travel, so the tile is already on
 -- screen by the time it finishes streaming.
 local TRAVEL_CAMERA_LIFT = 40
--- Dropped from this height by the second hop. Short enough to be harmless.
+-- How far above the camera the second hop parks the player. Everything below
+-- the camera is in shot, so this is the whole reason the character stays out of
+-- the photograph. It also has to outlast the fall: the player is in free fall
+-- from the moment it is recreated, and the exposure ends roughly three seconds
+-- later, so there is a wide margin here on purpose.
+local PLAYER_LIFT = 150
+-- How far above the camera the character must actually be before the pose is
+-- announced. Level with the lens is not behind it.
+local PERCH_MARGIN = 10
+-- Dropped from this height when the player is put back where they started.
 local LANDING_CLEARANCE = 1.0
 -- Horizontal distance within which the character counts as having arrived.
 -- Distinct point-of-interest tiles are at least a cell apart, so this cannot be
@@ -279,8 +298,11 @@ local function shootUpdate( game, dt )
 		end
 		-- The scene has streamed, so the raycast now has something to hit.
 		g_shoot.ground, g_shoot.probed = probeGround( centreX, centreY, target.groundHeight )
-		requestTravel( game, centreX, centreY, g_shoot.ground + LANDING_CLEARANCE )
-		g_shoot.phase = "landing"
+		-- Park the player above where the camera is about to be, so it is behind
+		-- the lens rather than in the middle of the picture.
+		requestTravel( game, centreX, centreY,
+			g_shoot.ground + cameraHeight( metres ) + PLAYER_LIFT )
+		g_shoot.phase = "perch"
 		g_shoot.timer = 0
 		return
 	end
@@ -288,16 +310,30 @@ local function shootUpdate( game, dt )
 	local height = ( g_shoot.ground or 0 ) + cameraHeight( metres )
 	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
 
-	if g_shoot.phase == "landing" then
-		if g_shoot.timer < SCRAPMAP_SHOOT_LANDING then
+	if g_shoot.phase == "perch" then
+		if g_shoot.timer < SCRAPMAP_SHOOT_PERCH then
+			return
+		end
+		-- Do not announce the pose until the character is genuinely behind the
+		-- camera, or it lands in the middle of the photograph. Still falling
+		-- from the first hop satisfies this on its own, which is fine: the
+		-- requirement is where the character is, not which hop put it there.
+		local character = localCharacter()
+		-- No character at all is no character in the picture, so treat a dead or
+		-- respawning player as clear rather than stalling on it.
+		local clearance = character and ( character:getWorldPosition().z - height )
+			or PLAYER_LIFT
+		if clearance < PERCH_MARGIN and g_shoot.timer < SCRAPMAP_SHOOT_PERCH_TIMEOUT then
 			return
 		end
 		g_shoot.phase = "hold"
 		g_shoot.timer = 0
+		-- Clearance is logged so a photograph with a character in it can be told
+		-- apart from one where the framing was simply wrong.
 		sm.log.info( string.format(
-			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.1f|%s",
+			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.1f|%s|%.1f",
 			tostring( target.uuid ), target.x, target.y, target.size or 1, metres,
-			height, tostring( g_shoot.probed ) ) )
+			height, tostring( g_shoot.probed ), clearance ) )
 		return
 	end
 

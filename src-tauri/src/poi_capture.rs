@@ -129,7 +129,11 @@ pub fn clear_request(game_root: &Path) {
     let _ = fs::remove_file(game_root.join("Survival").join(REQUEST_FILE));
 }
 
-/// Parses `SCRAPMAP_SHOT_V1|ready|<uuid>|<x>|<y>|<size>|<metres>`.
+/// Parses `SCRAPMAP_SHOT_V1|ready|<uuid>|<x>|<y>|<size>|...`.
+///
+/// Only the leading fields are read. Lua appends diagnostics after them -- the
+/// framing height, whether the ground probe hit, how far the character is above
+/// the camera -- and those must stay free to change without breaking capture.
 pub fn parse_ready(line: &str) -> Option<(String, u32)> {
     let payload = line.split_once("SCRAPMAP_SHOT_V1|ready|")?.1.trim();
     let mut fields = payload.split('|');
@@ -369,6 +373,12 @@ mod tests {
     fn ready_lines_parse_out_of_the_game_log() {
         let line = "12:00:01 [Lua] SCRAPMAP_SHOT_V1|ready|abc-123|-38|-42|4|256.00";
         assert_eq!(parse_ready(line), Some(("abc-123".to_owned(), 4)));
+        // Diagnostics are appended after the fields capture depends on, and
+        // adding another one must not stop the sweep photographing anything.
+        assert_eq!(
+            parse_ready("SCRAPMAP_SHOT_V1|ready|abc-123|-38|-42|4|256.00|221.7|hit|148.3"),
+            Some(("abc-123".to_owned(), 4))
+        );
         assert_eq!(parse_ready("unrelated log line"), None);
         // A truncated line must not be taken as a cue to capture.
         assert_eq!(parse_ready("SCRAPMAP_SHOT_V1|ready|abc-123|-38"), None);

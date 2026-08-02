@@ -183,17 +183,29 @@ over `network:sendToServer( "sv_scrapMapShootTravel", … )`.
 
 **Two hops per target.** The first drops the player in at 400 m above the tile,
 which forces the cell to load and lets its neighbours stream. Only then does a
-downward raycast have anything to hit, and the second hop stands the player on
-the measured ground. Recreating the character resets its velocity, so the long
-fall never lands and there is no fall damage.
+downward raycast have anything to hit, and the second hop parks the player
+150 m **above the camera**. Recreating the character resets its velocity, so the
+fall never accumulates and never lands.
+
+Above the camera is the whole trick. The camera looks straight down, so anything
+higher than it is out of frame regardless of how the capture is cropped, and a
+player that high is out of reach of anything that would like to kill it. The
+first version stood the player on the ground at the tile's centre, which put a
+falling character in the middle of the picture and dropped it into a warehouse
+full of robots. `setVisible( false )` did not save it.
+
+That the perch works at all rests on an observation from that run: the ground
+probes were hitting real terrain while the player was still at 400 m, so
+streaming does not need the player on the ground — only nearby in plan.
 
 Details that each cost a debugging round:
 
 - The ground probe is filtered to `sm.physics.filter.terrainSurface`. Unfiltered,
   a cast from 800 m down hits the falling character first and frames the shot
   around it.
-- The player stands at the tile's centre, which is the middle of the frame, so
-  the character is hidden with `setVisible( false )` for the exposure.
+- The pose is not announced until the character is measurably above the camera,
+  with a timeout. Waiting a fixed time instead let a slow second hop expose the
+  frame while the character was still falling through it.
 - A recreated character brings back the HUD, the player's controls and the
   default camera. The pose is re-applied whenever the character identity
   changes, not once at the start.
@@ -204,9 +216,7 @@ Details that each cost a debugging round:
 - At the end the player is returned to where the sweep found them.
 
 Roughly seven seconds per target, so a 116-target world takes about fifteen
-minutes. The character stands still on the ground for two of those seconds per
-target and **can be attacked** — hostile robots do not care that a photograph is
-in progress. Run the sweep somewhere quiet, or with `/godmode` on.
+minutes. The player spends all of it airborne.
 
 Tile sizes in the test world run 1, 2, 4 and 8 cells (68 / 28 / 16 / 4 of them).
 An 8-cell tile is 512 m across and the camera sits 443 m up, which asks for more
