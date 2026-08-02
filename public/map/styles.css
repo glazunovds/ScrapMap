@@ -576,6 +576,19 @@ body[data-profile-state="error"] .toggle-row {
   cursor: pointer;
 }
 
+.fog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.fog-actions small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .toggle-row input {
   position: absolute;
   width: 1px;

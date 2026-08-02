@@ -84,6 +84,9 @@
   });
   const poiCategoryOrder = Object.freeze(Object.keys(poiCategories));
   const autoRevealRadius = 2;
+  // Kept below the storage layer's MAX_FOG_BATCH so a full reveal splits into
+  // merges it will accept.
+  const FOG_DELTA_BATCH = 2000;
   const isTauriHost = Boolean(window.__TAURI__);
 
   const state = {
@@ -169,6 +172,7 @@
     schematicOnlyButton: document.getElementById("schematicOnlyButton"),
     hideAllPoiButton: document.getElementById("hideAllPoiButton"),
     fogToggle: document.getElementById("fogToggle"),
+    revealAllButton: document.getElementById("revealAllButton"),
     expandButton: document.getElementById("expandButton"),
     markerModeButton: document.getElementById("markerModeButton"),
     zoomInButton: document.getElementById("zoomInButton"),
@@ -1527,6 +1531,44 @@
     return discovered.length;
   }
 
+  /**
+   * Marks every cell in the layout as visited.
+   *
+   * Nothing needs fetching: the whole layout and every tile image are already
+   * local, so this only fills the visited set. Fog stays on, which keeps the
+   * frontier shading and lets the map fill in for a friend through the usual
+   * fog delta rather than being a private view-only toggle.
+   */
+  function revealAllCells() {
+    if (!state.layout) {
+      showToast("Карта ещё не загружена.", true);
+      return 0;
+    }
+    const discovered = [];
+    state.layout.cells.forEach((cell) => {
+      if (!state.visited.has(cell.key)) {
+        state.visited.add(cell.key);
+        discovered.push(cell);
+      }
+    });
+    if (discovered.length > 0) {
+      invalidateStaticFrame();
+      scheduleVisitedSave();
+      // The storage layer rejects a fog merge over MAX_FOG_BATCH cells, and a
+      // full reveal is several times that, so send it in batches.
+      for (let index = 0; index < discovered.length; index += FOG_DELTA_BATCH) {
+        notifyFogDelta(discovered.slice(index, index + FOG_DELTA_BATCH));
+      }
+      render();
+    }
+    showToast(
+      discovered.length > 0
+        ? `Открыто клеток: ${discovered.length}`
+        : "Вся карта уже открыта.",
+    );
+    return discovered.length;
+  }
+
   function loadLocalMarkers() {
     state.localMarkers = [];
     if (isTauriHost) {
@@ -2587,6 +2629,10 @@
   elements.centerButton.addEventListener("click", centerOnPlayer);
   elements.zoomInButton.addEventListener("click", () => adjustZoom(1.22));
   elements.zoomOutButton.addEventListener("click", () => adjustZoom(1 / 1.22));
+
+  elements.revealAllButton?.addEventListener("click", () => {
+    revealAllCells();
+  });
 
   elements.fogToggle.addEventListener("change", () => {
     state.fogEnabled = elements.fogToggle.checked;
