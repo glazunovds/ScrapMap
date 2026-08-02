@@ -21,22 +21,89 @@
     unknown: { base: "#42484a", detail: "#5c6365", edge: "#303536", label: "Неизвестно" }
   };
 
-  const poiGlyphs = {
-    schematic: "S",
-    mechanic: "M",
-    warehouse: "W",
-    packing: "P",
-    ruin: "R",
-    camp: "C",
-    lab: "L",
-    excavation: "E",
-    drilling: "D",
-    "crashed-ship": "S",
-    scrapyard: "Y",
-    quest: "!",
-    hideout: "H",
-    poi: "•"
-  };
+  /**
+   * Category silhouettes, drawn as canvas paths on a unit circle of the given
+   * radius. A shape is recognisable at a glance where a letter is not: at the
+   * sizes these render, a "W" and an "M" are the same smudge.
+   */
+  const poiIcons = Object.freeze({
+    // Circuit chip: body with pins down each side.
+    schematic(ctx, x, y, r) {
+      const half = r * 0.58;
+      ctx.rect(x - half, y - half, half * 2, half * 2);
+      for (const offset of [-half * 0.55, half * 0.55]) {
+        ctx.rect(x - half - r * 0.3, y + offset - r * 0.09, r * 0.3, r * 0.18);
+        ctx.rect(x + half, y + offset - r * 0.09, r * 0.3, r * 0.18);
+      }
+    },
+    // Exclamation mark: quest markers read as urgency.
+    quest(ctx, x, y, r) {
+      const w = r * 0.24;
+      ctx.moveTo(x - w, y - r * 0.72);
+      ctx.lineTo(x + w, y - r * 0.72);
+      ctx.lineTo(x + w * 0.7, y + r * 0.16);
+      ctx.lineTo(x - w * 0.7, y + r * 0.16);
+      ctx.closePath();
+      ctx.moveTo(x + w, y + r * 0.6);
+      ctx.arc(x, y + r * 0.6, w, 0, Math.PI * 2);
+    },
+    // Tent.
+    camp(ctx, x, y, r) {
+      ctx.moveTo(x, y - r * 0.78);
+      ctx.lineTo(x + r * 0.82, y + r * 0.62);
+      ctx.lineTo(x - r * 0.82, y + r * 0.62);
+      ctx.closePath();
+    },
+    // Warehouse: a wide shed with a pitched roof.
+    warehouse(ctx, x, y, r) {
+      ctx.moveTo(x - r * 0.85, y - r * 0.06);
+      ctx.lineTo(x, y - r * 0.76);
+      ctx.lineTo(x + r * 0.85, y - r * 0.06);
+      ctx.lineTo(x + r * 0.85, y + r * 0.66);
+      ctx.lineTo(x - r * 0.85, y + r * 0.66);
+      ctx.closePath();
+    },
+    // Hexagonal nut, for stations and the trader.
+    service(ctx, x, y, r) {
+      for (let index = 0; index < 6; index += 1) {
+        const angle = (Math.PI / 3) * index - Math.PI / 2;
+        const px = x + Math.cos(angle) * r * 0.82;
+        const py = y + Math.sin(angle) * r * 0.82;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    },
+    // Cave mouth: an arch standing on the ground line.
+    dungeon(ctx, x, y, r) {
+      ctx.moveTo(x - r * 0.76, y + r * 0.66);
+      ctx.lineTo(x - r * 0.76, y);
+      // Canvas y grows downward, so the dome needs the anticlockwise sweep;
+      // the default direction would put the arch upside down.
+      ctx.arc(x, y, r * 0.76, Math.PI, 0, true);
+      ctx.lineTo(x + r * 0.76, y + r * 0.66);
+      ctx.closePath();
+    },
+    // Four-point star for anything else worth a look.
+    landmark(ctx, x, y, r) {
+      const outer = r * 0.9;
+      const inner = r * 0.3;
+      for (let index = 0; index < 8; index += 1) {
+        const angle = (Math.PI / 4) * index - Math.PI / 2;
+        const length = index % 2 === 0 ? outer : inner;
+        const px = x + Math.cos(angle) * length;
+        const py = y + Math.sin(angle) * length;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    },
+    // Generator filler: a plain dot, deliberately unremarkable.
+    filler(ctx, x, y, r) {
+      ctx.arc(x, y, r * 0.42, 0, Math.PI * 2);
+    }
+  });
+
 
   const poiCategories = Object.freeze({
     schematic: {
@@ -757,10 +824,11 @@
     const radius = Core.clamp(scale * 0.16, 4.5, 13);
     const x = left + scale / 2;
     const y = top + scale / 2;
-    const kind = cell.poi.kind.toLowerCase();
-    const glyph = poiGlyphs[kind] || kind.charAt(0).toUpperCase() || "•";
+    const drawIcon = poiIcons[category] || poiIcons.landmark;
 
     context.save();
+    // The badge keeps the icon legible over any terrain; the silhouette on top
+    // is what actually identifies the category.
     context.shadowColor = "rgba(0, 0, 0, 0.72)";
     context.shadowBlur = 7;
     context.fillStyle = poiStyle.fill;
@@ -771,11 +839,11 @@
     context.fill();
     context.stroke();
     context.shadowBlur = 0;
+
     context.fillStyle = poiStyle.color;
-    context.font = `800 ${Math.max(7, radius * 0.92)}px Consolas, monospace`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(glyph, x, y + 0.4);
+    context.beginPath();
+    drawIcon(context, x, y, radius * 0.72);
+    context.fill();
     if (state.poiTargetCellKeys.has(cell.key)) {
       context.strokeStyle = "#fff1b8";
       context.lineWidth = Math.max(1.4, radius * 0.16);
@@ -1764,6 +1832,26 @@
     return counts;
   }
 
+  /** Renders one category silhouette into a small canvas for the filter list. */
+  function poiIconSwatch(category, color) {
+    const size = 13;
+    const ratio = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(size * ratio);
+    canvas.height = Math.round(size * ratio);
+    canvas.style.width = `${size}px`;
+    canvas.style.height = `${size}px`;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.scale(ratio, ratio);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      (poiIcons[category] || poiIcons.landmark)(ctx, size / 2, size / 2, size / 2);
+      ctx.fill();
+    }
+    return canvas;
+  }
+
   function renderPoiFilters() {
     if (!elements.poiFilterList) return;
     const counts = poiCounts();
@@ -1791,11 +1879,9 @@
       swatch.className = "poi-filter-swatch";
       swatch.style.setProperty("--poi-color", definition.color);
       swatch.style.setProperty("--poi-fill", definition.fill);
-      swatch.textContent = category === "schematic"
-        ? "S"
-        : category === "quest"
-          ? "!"
-          : "•";
+      // Draw the same silhouette the map uses, so the key is the legend rather
+      // than a second thing to learn.
+      swatch.replaceChildren(poiIconSwatch(category, definition.color));
 
       const text = document.createElement("span");
       const title = document.createElement("strong");
