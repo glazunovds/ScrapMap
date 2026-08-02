@@ -206,11 +206,17 @@ end
 -- brings back the HUD, the player's own controls and the default camera unless
 -- they are put back. Re-applying on every frame instead would mean asking the
 -- camera to enter the same state forty times a second, which is worth avoiding.
-local function holdPose()
+local function holdPose( insist )
 	local character = localCharacter()
 	-- Compared by identity rather than by id: a recreated character is a new
 	-- userdata, which is exactly the event this needs to notice.
-	if character ~= g_shoot.posedCharacter then
+	--
+	-- `insist` re-applies regardless, and the exposure passes it. Reacting only
+	-- to a changed character assumes nothing else ever puts the HUD or the
+	-- default camera back, and something does: four tiles in one sweep came back
+	-- as ordinary third-person gameplay, hotbar and compass included, while the
+	-- player was correctly perched three hundred metres up.
+	if insist or character ~= g_shoot.posedCharacter then
 		g_shoot.posedCharacter = character
 		sm.gui.hideGui( true )
 		sm.localPlayer.setLockedControls( true )
@@ -356,7 +362,8 @@ local function shootUpdate( game, dt )
 		return
 	end
 
-	holdPose()
+	-- Insist on the pose for the whole exposure, and while settling into it.
+	holdPose( g_shoot.phase == "perch" or g_shoot.phase == "hold" )
 	g_shoot.timer = g_shoot.timer + dt
 	g_shoot.rescueTimer = ( g_shoot.rescueTimer or 0 ) + dt
 
