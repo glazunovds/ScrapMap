@@ -27,6 +27,12 @@
 -- Recreating the character resets its velocity, so the fall never accumulates
 -- and never lands: each hop starts it again from zero.
 --
+-- The camera does not sit at the height that frames the tile exactly. A tower is
+-- nearly as tall as that camera is high, so its roof is barely below the lens
+-- and leans right out over the tile's edges. Instead the tile is measured for
+-- what is standing on it and the camera pulls back proportionally; ScrapMap
+-- crops the surplus away, so the stored photograph still lines up with the tile.
+--
 -- The handshake with ScrapMap is deliberately one-way. Lua logs that it is in
 -- position and holds the pose for a fixed dwell; ScrapMap watches the log and
 -- captures during that window. Lua cannot poll for an acknowledgement, because
@@ -78,6 +84,19 @@ local PLAYER_LIFT = 150
 local PERCH_MARGIN = 10
 -- Dropped from this height when the player is put back where they started.
 local LANDING_CLEARANCE = 1.0
+-- Casts per axis when measuring how tall the tile's buildings are. Fixed rather
+-- than scaled by tile size: eighty-one casts is nothing once per target, and a
+-- grid fine enough for a one-cell tile would be thousands on a sixteen.
+local STRUCTURE_GRID = 9
+-- How many times its own height above a structure the camera should sit. Four
+-- puts the roof a third of the way up the column, which reads as a plan view
+-- rather than an oblique one.
+local LEAN_TOLERANCE = 4.0
+-- Ceiling on that pull-back, as a multiple of the height that frames the tile
+-- exactly. Everything outside the tile is cropped away afterwards, so pulling
+-- back spends real pixels: 2.5 keeps the kept part of a 1440-tall capture above
+-- the 512 the atlas stores.
+local MAX_PULL_BACK = 2.5
 -- Horizontal distance within which the character counts as having arrived.
 -- Distinct point-of-interest tiles are at least a cell apart, so this cannot be
 -- satisfied by the previous target's position.
@@ -124,31 +143,68 @@ local function arrivedAt( x, y )
 	return dx * dx + dy * dy <= ARRIVE_RADIUS * ARRIVE_RADIUS
 end
 
--- Measures the ground under the tile's centre.
---
--- The cast is filtered to the terrain surface on purpose: unfiltered, it hits
--- the character falling through it and frames the shot around that instead of
--- the ground.
-local function probeGround( x, y, fallback )
+-- Casts straight down at one point and returns the height it hit, or nil.
+local function probeAt( x, y, filter )
 	local from = sm.vec3.new( x, y, GROUND_PROBE_TOP )
 	local to = sm.vec3.new( x, y, GROUND_PROBE_BOTTOM )
-	-- Excluded twice over: named as the object to ignore, and filtered out by
-	-- asking only for the terrain surface. Either alone would do; the filter is
-	-- read defensively because it is not used anywhere else on the client.
+	-- The character is excluded by name as well as by filter: it is falling
+	-- through this very column, and an unfiltered cast hits it first.
 	local character = localCharacter()
-	local filter = sm.physics.filter and sm.physics.filter.terrainSurface
 	local called, hit, result
 	if filter then
 		called, hit, result = pcall( sm.physics.raycast, from, to, character, filter )
-	end
-	if not ( called and hit ) then
+	else
 		called, hit, result = pcall( sm.physics.raycast, from, to, character )
 	end
 	if called and hit and type( result ) == "table" and result.pointWorld then
-		return result.pointWorld.z, "hit"
+		return result.pointWorld.z
+	end
+	return nil
+end
+
+-- Measures the ground under the tile's centre.
+local function probeGround( x, y, fallback )
+	local filter = sm.physics.filter and sm.physics.filter.terrainSurface
+	local surface = filter and probeAt( x, y, filter )
+	if surface == nil then
+		surface = probeAt( x, y, nil )
+	end
+	if surface ~= nil then
+		return surface, "hit"
 	end
 	-- Sea level is a poor guess, but better than skipping the shot.
 	return fallback or 0, "miss"
+end
+
+-- Measures how far the tallest thing standing on the tile rises above the
+-- ground, by sampling a grid of downward casts across the whole footprint.
+--
+-- This is what decides how far back the camera goes. A tower photographed from
+-- a camera only its own height above the ground leans right out over the tile's
+-- edges, because its roof is barely below the lens; pulling back shrinks that
+-- towards a true plan view.
+--
+-- Filtered to terrain assets, which is where buildings, towers, the crashed
+-- ship and giant trees live. Ordinary forest is a harvestable and is excluded on
+-- purpose -- a wood is not a structure, and treating it as one would push the
+-- camera back for half the map.
+local function probeStructure( centreX, centreY, metres, ground )
+	local filter = sm.physics.filter and sm.physics.filter.terrainAsset
+	if filter == nil then
+		return 0
+	end
+	local top = ground
+	local step = metres / ( STRUCTURE_GRID - 1 )
+	for i = 0, STRUCTURE_GRID - 1 do
+		for j = 0, STRUCTURE_GRID - 1 do
+			local hit = probeAt( centreX - metres * 0.5 + i * step,
+				centreY - metres * 0.5 + j * step, filter )
+			if hit ~= nil and hit > top then
+				top = hit
+			end
+		end
+	end
+	return top - ground
 end
 
 -- Re-applied whenever the character changes, not just once at the start.
@@ -210,6 +266,8 @@ local function enterTarget( game, index )
 	g_shoot.timer = 0
 	g_shoot.ground = nil
 	g_shoot.probed = nil
+	g_shoot.lift = nil
+	g_shoot.structure = nil
 	if index > #g_shoot.targets then
 		finishSweep( game )
 		return
@@ -296,19 +354,31 @@ local function shootUpdate( game, dt )
 		if g_shoot.timer < SCRAPMAP_SHOOT_SETTLE then
 			return
 		end
-		-- The scene has streamed, so the raycast now has something to hit.
+		-- The scene has streamed, so the raycasts now have something to hit.
 		g_shoot.ground, g_shoot.probed = probeGround( centreX, centreY, target.groundHeight )
+		local structure = probeStructure( centreX, centreY, metres, g_shoot.ground )
+		local exact = cameraHeight( metres )
+		-- Far enough back that the tile's buildings stand up rather than lean
+		-- out, but never so far that the crop costs more than it is worth.
+		g_shoot.lift = math.max( exact, math.min( structure * LEAN_TOLERANCE,
+			exact * MAX_PULL_BACK ) )
+		g_shoot.structure = structure
 		-- Park the player above where the camera is about to be, so it is behind
 		-- the lens rather than in the middle of the picture.
 		requestTravel( game, centreX, centreY,
-			g_shoot.ground + cameraHeight( metres ) + PLAYER_LIFT )
+			g_shoot.ground + g_shoot.lift + PLAYER_LIFT )
 		g_shoot.phase = "perch"
 		g_shoot.timer = 0
 		return
 	end
 
-	local height = ( g_shoot.ground or 0 ) + cameraHeight( metres )
+	local lift = g_shoot.lift or cameraHeight( metres )
+	local height = ( g_shoot.ground or 0 ) + lift
 	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
+	-- Ground distance the full frame height now covers. It is >= the tile
+	-- whenever the camera pulled back, and ScrapMap crops the difference away so
+	-- the stored photograph still lines up with the tile exactly.
+	local covered = metres * lift / cameraHeight( metres )
 
 	if g_shoot.phase == "perch" then
 		if g_shoot.timer < SCRAPMAP_SHOOT_PERCH then
@@ -328,12 +398,14 @@ local function shootUpdate( game, dt )
 		end
 		g_shoot.phase = "hold"
 		g_shoot.timer = 0
-		-- Clearance is logged so a photograph with a character in it can be told
-		-- apart from one where the framing was simply wrong.
+		-- `covered` is what ScrapMap crops against. The rest is diagnostic:
+		-- clearance tells a photograph with a character in it apart from one
+		-- that was simply framed wrong, and structure explains the pull-back.
 		sm.log.info( string.format(
-			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.1f|%s|%.1f",
+			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.2f|%.1f|%s|%.1f|%.1f",
 			tostring( target.uuid ), target.x, target.y, target.size or 1, metres,
-			height, tostring( g_shoot.probed ), clearance ) )
+			covered, height, tostring( g_shoot.probed ), clearance,
+			g_shoot.structure or 0 ) )
 		return
 	end
 

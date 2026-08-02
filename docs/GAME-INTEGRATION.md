@@ -198,6 +198,37 @@ That the perch works at all rests on an observation from that run: the ground
 probes were hitting real terrain while the player was still at 400 m, so
 streaming does not need the player on the ground — only nearby in plan.
 
+### Framing: the camera does not sit at the exact height
+
+The height at which a tile of `metres` fills the frame vertically is
+`(metres / 2) / tan(fov / 2)` — 55 m for a one-cell tile. A 40 m tower's roof is
+then only 15 m below the lens, so it is magnified nearly four times relative to
+the ground and leans right out over the tile's edges. The first sweep showed
+this on every tower.
+
+So each tile is measured before the shot. A 9×9 grid of downward casts filtered
+to `sm.physics.filter.terrainAsset` finds the tallest thing standing on it, and
+the camera pulls back to `4 ×` that height — capped at `2.5 ×` the exact height,
+because everything outside the tile is thrown away and pulling back spends real
+pixels. Ordinary forest is a *harvestable*, not an asset, so a wood does not
+count as a structure; if it did, half the map would pull back.
+
+Lua then reports both the tile size and the ground distance the whole frame
+covers, and ScrapMap keeps `metres / covered` of the frame height:
+
+```
+SCRAPMAP_SHOT_V1|ready|<uuid>|<x>|<y>|<size>|<metres>|<covered>|…
+```
+
+The stored photograph therefore still maps exactly onto the tile's footprint,
+which is what the renderer requires. `parse_ready` reads nothing past `covered`,
+so the trailing diagnostics stay free to change; a line without it — an older
+patch — keeps the whole frame.
+
+The pull-back only engages when a structure is taller than about a fifth of the
+tile, so in practice it affects one-cell tiles with towers on them and leaves
+everything else alone.
+
 Details that each cost a debugging round:
 
 - The ground probe is filtered to `sm.physics.filter.terrainSurface`. Unfiltered,

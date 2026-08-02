@@ -16,9 +16,9 @@ to game memory, no graphics hook, no installer and no background service.
 - Points of interest by category, with icons, filters and search
 - Local markers, per-world profiles, separate profiles for peer-hosted worlds
 - Live position for the local player
+- Photographed points of interest, taken with the game's own camera
 
-Not yet: shared fog and markers between players. Photographed points of interest
-are implemented but unproven — see `docs/ROADMAP.md`.
+Not yet: shared fog and markers between players. See `docs/ROADMAP.md`.
 
 ## Running it
 

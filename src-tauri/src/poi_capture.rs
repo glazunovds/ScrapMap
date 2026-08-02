@@ -34,6 +34,9 @@ const MIN_LIT_FRACTION: f32 = 0.35;
 /// up inside a hill, under a lake or above the clouds returns an evenly lit
 /// sheet: bright enough to pass a brightness test, and completely featureless.
 const MIN_DETAIL: f32 = 6.0;
+/// Floor on the fraction of the frame a shot may keep. A malformed or absurd
+/// `covered` must not reduce the capture to a handful of pixels.
+const MIN_CROP: f32 = 0.2;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,19 +132,29 @@ pub fn clear_request(game_root: &Path) {
     let _ = fs::remove_file(game_root.join("Survival").join(REQUEST_FILE));
 }
 
-/// Parses `SCRAPMAP_SHOT_V1|ready|<uuid>|<x>|<y>|<size>|...`.
+/// Parses `SCRAPMAP_SHOT_V1|ready|<uuid>|<x>|<y>|<size>|<metres>|<covered>|...`.
 ///
-/// Only the leading fields are read. Lua appends diagnostics after them -- the
-/// framing height, whether the ground probe hit, how far the character is above
-/// the camera -- and those must stay free to change without breaking capture.
-pub fn parse_ready(line: &str) -> Option<(String, u32)> {
+/// `covered` is the ground distance the full frame height spans. It exceeds the
+/// tile whenever the camera pulled back to stop a tall building leaning out over
+/// the tile's edges, and their ratio is the fraction of the frame to keep.
+///
+/// Everything after it is diagnostic and deliberately not read here, so Lua can
+/// add to it without breaking capture. A line that stops early -- or one from an
+/// older patch that never pulled back -- yields a whole-frame crop.
+pub fn parse_ready(line: &str) -> Option<(String, u32, f32)> {
     let payload = line.split_once("SCRAPMAP_SHOT_V1|ready|")?.1.trim();
     let mut fields = payload.split('|');
     let uuid = fields.next()?.trim().to_owned();
     let _x = fields.next()?;
     let _y = fields.next()?;
     let size: u32 = fields.next()?.trim().parse().ok()?;
-    (!uuid.is_empty() && size > 0).then_some((uuid, size))
+    let metres = fields.next().and_then(|value| value.trim().parse::<f32>().ok());
+    let covered = fields.next().and_then(|value| value.trim().parse::<f32>().ok());
+    let crop = match (metres, covered) {
+        (Some(metres), Some(covered)) if metres > 0.0 && covered >= metres => metres / covered,
+        _ => 1.0,
+    };
+    (!uuid.is_empty() && size > 0).then_some((uuid, size, crop.clamp(MIN_CROP, 1.0)))
 }
 
 pub fn is_sweep_finished(line: &str) -> bool {
@@ -161,7 +174,12 @@ pub struct ShotWatcher {
 
 #[derive(Debug, PartialEq)]
 pub enum ShotEvent {
-    Ready { uuid: String, size: u32 },
+    Ready {
+        uuid: String,
+        size: u32,
+        /// Fraction of the frame height that is the tile itself.
+        crop: f32,
+    },
     Finished,
 }
 
@@ -192,8 +210,8 @@ impl ShotWatcher {
         let mut events = Vec::new();
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap_or(0) > 0 {
-            if let Some((uuid, size)) = parse_ready(&line) {
-                events.push(ShotEvent::Ready { uuid, size });
+            if let Some((uuid, size, crop)) = parse_ready(&line) {
+                events.push(ShotEvent::Ready { uuid, size, crop });
             } else if is_sweep_finished(&line) {
                 events.push(ShotEvent::Finished);
             }
@@ -227,16 +245,20 @@ fn newest_log(directory: &Path) -> Option<PathBuf> {
 
 /// Captures the framed tile and stores it beside the generated atlas.
 ///
-/// The camera frames the tile to the full height of the client area, so the
-/// centred square of that height is exactly the tile.
+/// `crop` is the fraction of the frame height the tile occupies. It is 1.0 when
+/// the camera framed the tile exactly, and less when it pulled back so that a
+/// tall building would stand up rather than lean out; the surplus is discarded
+/// here so the stored image still maps onto the tile's own footprint.
 pub fn capture_tile(
     window_handle: isize,
     uuid: &str,
+    crop: f32,
     atlas_root: &Path,
 ) -> Result<PathBuf, String> {
     let frame = capture_window(window_handle)?;
+    let kept = ((frame.height as f32) * crop.clamp(MIN_CROP, 1.0)).round() as u32;
     let square = frame
-        .centre_square(frame.height)
+        .centre_square(kept.max(1))
         .ok_or("the captured frame has no usable square")?;
     let lit = square.lit_fraction();
     if lit < MIN_LIT_FRACTION {
@@ -371,19 +393,33 @@ mod tests {
 
     #[test]
     fn ready_lines_parse_out_of_the_game_log() {
-        let line = "12:00:01 [Lua] SCRAPMAP_SHOT_V1|ready|abc-123|-38|-42|4|256.00";
-        assert_eq!(parse_ready(line), Some(("abc-123".to_owned(), 4)));
-        // Diagnostics are appended after the fields capture depends on, and
-        // adding another one must not stop the sweep photographing anything.
-        assert_eq!(
-            parse_ready("SCRAPMAP_SHOT_V1|ready|abc-123|-38|-42|4|256.00|221.7|hit|148.3"),
-            Some(("abc-123".to_owned(), 4))
-        );
+        // A camera that framed the tile exactly keeps the whole frame.
+        let line = "12:00:01 [Lua] SCRAPMAP_SHOT_V1|ready|abc-123|-38|-42|4|256.00|256.00|221.7|hit|148.3|0.0";
+        assert_eq!(parse_ready(line), Some(("abc-123".to_owned(), 4, 1.0)));
         assert_eq!(parse_ready("unrelated log line"), None);
         // A truncated line must not be taken as a cue to capture.
         assert_eq!(parse_ready("SCRAPMAP_SHOT_V1|ready|abc-123|-38"), None);
         assert!(is_sweep_finished("[Lua] SCRAPMAP_SHOT_V1|done|116"));
         assert!(!is_sweep_finished("[Lua] SCRAPMAP_SHOT_V1|ready|a|1|2|1|64"));
+    }
+
+    #[test]
+    fn a_pulled_back_camera_reports_the_fraction_of_the_frame_to_keep() {
+        // 256 m of tile inside 640 m of view: keep two fifths of the frame.
+        let (_, _, crop) =
+            parse_ready("SCRAPMAP_SHOT_V1|ready|ship|-38|-42|4|256.00|640.00|554.3|hit|150.0|62.0")
+                .unwrap();
+        assert!((crop - 0.4).abs() < 1e-6, "crop was {crop}");
+
+        // Lines from a patch that predates the pull-back keep the whole frame,
+        // as do nonsensical ones -- a bad number must not shrink the capture to
+        // nothing.
+        let old = parse_ready("SCRAPMAP_SHOT_V1|ready|camp|1|2|1|64.00").unwrap();
+        assert_eq!(old.2, 1.0);
+        let absurd = parse_ready("SCRAPMAP_SHOT_V1|ready|camp|1|2|1|64.00|100000.0").unwrap();
+        assert_eq!(absurd.2, MIN_CROP);
+        let backwards = parse_ready("SCRAPMAP_SHOT_V1|ready|camp|1|2|1|64.00|8.0").unwrap();
+        assert_eq!(backwards.2, 1.0);
     }
 
     #[test]

@@ -5,12 +5,12 @@
 Working: the portable overlay attached to the game window, compact and full map
 with global shortcuts, SQLite profiles with world and server isolation, fog of
 war with a reveal-all control, local markers, POI categories with per-category
-icons, search and filters, live local-player telemetry, and a procedurally
-generated tile atlas covering all 493 tiles with terrain, ground cover, water,
-hillshading, buildings and forest.
+icons, search and filters, live local-player telemetry, a procedurally generated
+tile atlas covering all 493 tiles with terrain, ground cover, water, hillshading,
+buildings and forest, and real photographs of every point of interest taken with
+the game's own camera.
 
-Not working: shared fog and markers. POI photography is implemented but has not
-yet been run end to end in the game.
+Not working: shared fog and markers.
 
 ## Done
 
@@ -42,28 +42,30 @@ no licensing constraint, and valid for every world on the same game build.
 icons. Generator filler (`POI_*_RANDOM*`, over six hundred cells) is sorted into
 its own category and off by default.
 
+**M6, POI photography** — done, after two false starts.
+
+Terrain streams around the player, not the camera, so a camera-only sweep
+photographed sky wherever the player was not: half of a 116-target run came back
+as skybox. The way out was the game's own teleport —
+`SurvivalGame.sv_e_recreatePlayerInWorld` loads the destination cell and *then*
+recreates the character in the load callback, so the player and the camera
+travel together.
+
+The second attempt stood the player on the ground at the tile's centre, which
+photographed a falling character in the middle of every frame and dropped it
+into a warehouse full of robots. The player is now parked above the camera,
+where it is both out of frame and out of reach.
+
+The last correction was framing: a tower photographed from a camera barely
+higher than itself leans out over the tile's edges, so each tile is measured for
+what is standing on it and the camera pulls back proportionally, with ScrapMap
+cropping the surplus. `GAME-INTEGRATION.md` has the details.
+
+116 of 116 tiles photographed, one of them white. Not worth chasing a single
+frame; if the failure rate climbs, the frame guards in `poi_capture.rs` are the
+place to look.
+
 ## Next
-
-### POI photography
-
-The blocker was real — terrain streams around the player, not the camera, so a
-camera-only sweep photographed sky wherever the player was not, and about half a
-116-target run came back as skybox.
-
-The way out was the game's own teleport. `SurvivalGame.sv_e_recreatePlayerInWorld`
-loads the destination cell and *then* recreates the character in the load
-callback, so the sweep now moves the player and the camera together. Two hops
-per target: in high to force the cell to load, then down onto the measured
-ground for the exposure. `GAME-INTEGRATION.md` has the details.
-
-**Not yet verified in the game.** What remains is to run it: check the hit rate,
-confirm the player is returned to their starting position, and see whether two
-seconds standing still per target is survivable in a populated world.
-
-If the sweep turns out to be too disruptive, opportunistic capture during normal
-play remains the cheap alternative — notice when the player happens to be near
-an un-photographed POI and capture then, with no teleporting and no locked
-controls. It only covers places actually visited.
 
 ### Shared fog and markers
 

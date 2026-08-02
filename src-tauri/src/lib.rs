@@ -856,13 +856,13 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                         .load(Ordering::Acquire) as isize;
                     for event in shot_watcher.poll(&directory) {
                         match event {
-                            poi_capture::ShotEvent::Ready { uuid, .. } if window != 0 => {
+                            poi_capture::ShotEvent::Ready { uuid, crop, .. } if window != 0 => {
                                 // Let the scene finish streaming before looking.
                                 thread::sleep(Duration::from_millis(1_200));
                                 match atlas_bake::atlas_root()
                                     .ok_or_else(|| "LOCALAPPDATA is not set".to_owned())
                                     .and_then(|root| {
-                                        poi_capture::capture_tile(window, &uuid, &root)
+                                        poi_capture::capture_tile(window, &uuid, crop, &root)
                                     }) {
                                     Ok(_) => photographed.push(uuid),
                                     Err(error) => {
