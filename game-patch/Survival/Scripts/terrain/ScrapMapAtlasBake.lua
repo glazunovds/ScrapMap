@@ -21,7 +21,7 @@
 -- twenty seconds on the first world load and nothing afterwards. Lower it to
 -- spread the work across several loads instead.
 
-SCRAPMAP_ATLAS_VERSION = 6
+SCRAPMAP_ATLAS_VERSION = 7
 
 -- Samples per cell edge. Material drives the picture, so it gets one sample per
 -- metre, keeping 8 m roads about 8 px wide. Tint and height vary smoothly and
@@ -323,7 +323,12 @@ function ScrapMapBakeAtlas()
 						materialEncoding = "surface-class-hex",
 						encoding = "rgb565-hex",
 						heightEncoding = "decimetre-biased-hex",
-						assetEncoding = "palette-index-quarter-metre-hex",
+						assetEncoding = "palette-index-quarter-metre-yaw-hex",
+						-- The saved document names its fields one by one, so a
+						-- new one in the sampled table does not arrive here on
+						-- its own. Adding it there and forgetting this is what
+						-- left four hundred tiles unreadable.
+						assetStride = result.assetStride,
 						assetCount = result.assetCount,
 						assetPalette = result.assetPalette,
 						assets = result.assets,

@@ -176,13 +176,13 @@ fn decode_assets(text: &str, stride: usize) -> Result<Vec<PlacedAsset>, String> 
     }
     // The baker names its stride rather than leaving it to be inferred: 9 and
     // 11 both divide plausible stream lengths, so guessing is ambiguous.
-    let stride = if stride == 11 { 11 } else { 9 };
-    if !text.len().is_multiple_of(stride) {
-        return Err(format!(
-            "asset stream length {} is not a multiple of {stride}",
-            text.len()
-        ));
-    }
+    // Prefer what the baker says, but accept the other width if that is the one
+    // that actually divides -- a stream written by a baker that records the
+    // stride and a reader that does not agree on it should still be legible.
+    let stride = [if stride == 11 { 11 } else { 9 }, 9, 11]
+        .into_iter()
+        .find(|candidate| text.len().is_multiple_of(*candidate))
+        .ok_or_else(|| format!("asset stream length {} fits no known stride", text.len()))?;
     let field = |slice: &str| usize::from_str_radix(slice, 16).map_err(|_| "bad hex".to_owned());
     let mut placed = Vec::with_capacity(text.len() / stride);
     for chunk in text.as_bytes().chunks_exact(stride) {
@@ -697,7 +697,17 @@ fn convert_one(
 
     // Trees, rocks, buildings and the crashed ship are assets rather than
     // terrain, so nothing above sees them.
-    let placed = decode_assets(tile.assets.as_deref().unwrap_or_default(), tile.asset_stride)?;
+    // Terrain does not depend on the objects, so an unreadable asset stream
+    // costs the buildings on a tile, not the tile. Failing the whole conversion
+    // left four hundred cells blank on the map.
+    let placed = match decode_assets(tile.assets.as_deref().unwrap_or_default(), tile.asset_stride)
+    {
+        Ok(placed) => placed,
+        Err(error) => {
+            eprintln!("ScrapMap could not read the objects on {}: {error}", tile.uuid);
+            Vec::new()
+        }
+    };
     if !placed.is_empty() {
         let palette: Vec<Option<AssetInfo>> = tile
             .asset_palette
@@ -1392,6 +1402,38 @@ mod tests {
             "color": hex_u16(&color),
             "height": hex_u16(&height),
         })
+    }
+
+    #[test]
+    fn an_unreadable_asset_stream_costs_the_objects_not_the_tile() {
+        // A length that fits neither stride. Losing the whole tile over this
+        // blanked four hundred cells on the map.
+        assert!(decode_assets("ABCDEFG", 11).is_err());
+
+        let game_root = scratch_dir("game-bad-assets");
+        let atlas_root = scratch_dir("atlas-bad-assets");
+        let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+        fs::create_dir_all(&baked_dir).unwrap();
+        let mut tile = baked_tile("eeee-5555", 1, 64, 32);
+        tile["assets"] = json!("ABCDEFG");
+        tile["assetStride"] = json!(11.0);
+        fs::write(
+            baked_dir.join("eeee-5555.json"),
+            serde_json::to_vec(&tile).unwrap(),
+        )
+        .unwrap();
+
+        let report = convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        assert_eq!(report.converted, 1, "the terrain should still be drawn");
+        assert_eq!(report.failed, 0);
+        assert!(atlas_root
+            .join("tiles")
+            .join(GENERATED_DIRECTORY)
+            .join("eeee-5555.png")
+            .exists());
+
+        fs::remove_dir_all(&game_root).ok();
+        fs::remove_dir_all(&atlas_root).ok();
     }
 
     #[test]
