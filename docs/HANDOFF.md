@@ -163,8 +163,18 @@ checked every 1.5 s is 75 m of fall between checks at terminal velocity, and the
 rescue itself has to load a cell before it takes effect. Now 120 m, checked every
 0.5 s.
 
-The gap that lets it happen at all is between targets: the fall from the previous
-perch continues while the next travel's cell load is pending.
+The gap that lets it happen is waiting for a cell to load, not the exposure. The
+fall clock only resets when the character is recreated, so what matters is the
+longest interval between teleports — and that is `travel` arrival plus `settle`.
+A slow arrival makes it seven or eight seconds of unbroken fall from 400 m, which
+reaches the ground.
+
+Widening the rescue margin treated the symptom. The sweep now **re-issues the
+travel every 1.5 s while approaching**, so the player never falls for longer than
+that at a stretch. It deliberately does not do this during the exposure:
+recreating the character is what resets the fall, and doing it with the shutter
+open risks the pose being reapplied mid-frame. Three seconds of falling from a
+300 m perch is harmless.
 
 **Run `/godmode` before sweeping.** Four runs have now ended in a death, and the
 project rules out touching health from ScrapMap itself — but the dev console is

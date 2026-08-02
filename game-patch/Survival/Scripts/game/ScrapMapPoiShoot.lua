@@ -108,6 +108,18 @@ local MAX_PULL_BACK = 2.5
 local FALL_FLOOR = 120
 -- Seconds between rescues, so one slow travel does not become a stream of them.
 local FALL_RESCUE_INTERVAL = 0.5
+-- Seconds between re-issuing the travel while approaching a target.
+--
+-- The fall clock only resets when the character is recreated, so the danger is
+-- the longest gap between teleports -- and that is waiting for a cell to load,
+-- not the exposure. A slow arrival plus the settle is seven or eight seconds of
+-- unbroken fall from four hundred metres, which reaches the ground and kills.
+-- Re-asking bounds it: the player never falls for more than this at a time.
+--
+-- Deliberately not done during the exposure. Recreating the character is what
+-- resets the fall, and doing that while the shutter is open risks the pose being
+-- reapplied mid-frame. Three seconds of falling from the perch is harmless.
+local TRAVEL_REFRESH = 1.5
 -- Horizontal distance within which the character counts as having arrived.
 -- Distinct point-of-interest tiles are at least a cell apart, so this cannot be
 -- satisfied by the previous target's position.
@@ -248,6 +260,7 @@ local function enterTarget( game, index )
 	g_shoot.probed = nil
 	g_shoot.lift = nil
 	g_shoot.structure = nil
+	g_shoot.refreshTimer = 0
 	if index > #g_shoot.targets then
 		finishSweep( game )
 		return
@@ -343,6 +356,15 @@ local function shootUpdate( game, dt )
 
 	local height = ( g_shoot.ground or 0 ) + ( g_shoot.lift or cameraHeight( metres ) )
 	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
+
+	-- Keep resetting the fall while waiting; see TRAVEL_REFRESH.
+	if g_shoot.phase == "travel" or g_shoot.phase == "settle" then
+		g_shoot.refreshTimer = ( g_shoot.refreshTimer or 0 ) + dt
+		if g_shoot.refreshTimer >= TRAVEL_REFRESH then
+			g_shoot.refreshTimer = 0
+			requestTravel( game, centreX, centreY, TRAVEL_ALTITUDE )
+		end
+	end
 
 	if g_shoot.phase == "travel" then
 		if arrivedAt( centreX, centreY ) then
