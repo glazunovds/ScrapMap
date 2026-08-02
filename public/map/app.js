@@ -80,9 +80,21 @@
       shortLabel: "ПРОЧЕЕ",
       color: "#84d38c",
       fill: "#203724"
+    },
+    filler: {
+      label: "Случайная генерация",
+      shortLabel: "ФОН",
+      color: "#8d9a94",
+      fill: "#242a28"
     }
   });
   const poiCategoryOrder = Object.freeze(Object.keys(poiCategories));
+  // The generator marks every random lake, roadside patch and filler spot as a
+  // POI. There are over six hundred of them and they only restate what the
+  // terrain already shows, so they stay off until asked for.
+  const defaultPoiCategories = Object.freeze(
+    poiCategoryOrder.filter((category) => category !== "filler")
+  );
   const autoRevealRadius = 2;
   // Kept below the storage layer's MAX_FOG_BATCH so a full reveal splits into
   // merges it will accept.
@@ -100,7 +112,7 @@
     poiSearchQuery: "",
     poiTargetId: null,
     poiTargetCellKeys: new Set(),
-    poiEnabled: new Set(poiCategoryOrder),
+    poiEnabled: new Set(defaultPoiCategories),
     fogEnabled: true,
     expanded: false,
     markerMode: false,
@@ -173,6 +185,8 @@
     hideAllPoiButton: document.getElementById("hideAllPoiButton"),
     fogToggle: document.getElementById("fogToggle"),
     revealAllButton: document.getElementById("revealAllButton"),
+    miniCornerSelect: document.getElementById("miniCornerSelect"),
+    miniSizeSelect: document.getElementById("miniSizeSelect"),
     expandButton: document.getElementById("expandButton"),
     markerModeButton: document.getElementById("markerModeButton"),
     zoomInButton: document.getElementById("zoomInButton"),
@@ -1616,7 +1630,7 @@
   }
 
   function loadPoiFilters() {
-    state.poiEnabled = new Set(poiCategoryOrder);
+    state.poiEnabled = new Set(defaultPoiCategories);
     if (isTauriHost) {
       // In the app the profile store owns the fog preference and applySettings
       // restores it. Forcing it on here would discard an explicit opt-out every
@@ -2633,6 +2647,52 @@
   elements.revealAllButton?.addEventListener("click", () => {
     revealAllCells();
   });
+
+  // The compact map's placement is a property of this machine's screen and the
+  // game's HUD, not of a world, so it lives in localStorage rather than the
+  // per-profile store.
+  const MINI_LAYOUT_STORAGE_KEY = "sm-minimap:mini-layout";
+
+  function applyMiniLayout(persist) {
+    const corner = Number(elements.miniCornerSelect?.value ?? 1);
+    const size = Number(elements.miniSizeSelect?.value ?? 420);
+    if (persist) {
+      try {
+        window.localStorage.setItem(
+          MINI_LAYOUT_STORAGE_KEY,
+          JSON.stringify({ corner, size })
+        );
+      } catch {
+        // A full or disabled store only costs the preference, not the change.
+      }
+    }
+    // Dispatched directly: this is native window placement, so it must not be
+    // held back by profile hydration the way world data is.
+    if (isTauriHost) {
+      window.dispatchEvent(
+        new CustomEvent("sm-minimap:mini-layout", { detail: { corner, size } })
+      );
+    }
+  }
+
+  function restoreMiniLayout() {
+    try {
+      const saved = JSON.parse(
+        window.localStorage.getItem(MINI_LAYOUT_STORAGE_KEY) || "null"
+      );
+      if (saved && elements.miniCornerSelect && elements.miniSizeSelect) {
+        elements.miniCornerSelect.value = String(saved.corner ?? 1);
+        elements.miniSizeSelect.value = String(saved.size ?? 420);
+      }
+    } catch {
+      // Fall back to the markup defaults.
+    }
+    applyMiniLayout(false);
+  }
+
+  elements.miniCornerSelect?.addEventListener("change", () => applyMiniLayout(true));
+  elements.miniSizeSelect?.addEventListener("change", () => applyMiniLayout(true));
+  restoreMiniLayout();
 
   elements.fogToggle.addEventListener("change", () => {
     state.fogEnabled = elements.fogToggle.checked;

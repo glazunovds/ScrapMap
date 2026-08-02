@@ -27,7 +27,8 @@ use diagnostic_source::{
 use game_build::{probe_game_build_process, GameBuildProbe};
 use game_log_source::GameLogSource;
 use game_window::{
-    default_mini_overlay_geometry, full_overlay_geometry, overlay_should_be_present,
+    full_overlay_geometry, mini_overlay_geometry, overlay_should_be_present, MiniCorner,
+    DEFAULT_MINI_LOGICAL_MARGIN, DEFAULT_MINI_LOGICAL_SIZE,
     GameWindowPoll, GameWindowSnapshot, GameWindowTracker, NativeWindowHandle, OverlayGeometry,
     WindowIdentity,
 };
@@ -57,6 +58,10 @@ struct OverlayState {
     last_geometry: Mutex<Option<OverlayGeometry>>,
     last_game_status: Mutex<Option<GameWindowStatusEvent>>,
     game_process_id: AtomicU32,
+    /// Compact-map size and corner, so the map can be moved clear of the
+    /// game's own HUD without rebuilding.
+    mini_size: AtomicU32,
+    mini_corner: AtomicU32,
 }
 
 #[derive(Default)]
@@ -116,6 +121,8 @@ impl Default for OverlayState {
             last_geometry: Mutex::new(None),
             last_game_status: Mutex::new(None),
             game_process_id: AtomicU32::new(0),
+            mini_size: AtomicU32::new(DEFAULT_MINI_LOGICAL_SIZE),
+            mini_corner: AtomicU32::new(1),
         }
     }
 }
@@ -245,13 +252,23 @@ fn configure_overlay_mode(window: &WebviewWindow, expanded: bool) -> Result<(), 
         .map_err(|error| error.to_string())
 }
 
-fn geometry_for_game(game: Option<&GameWindowSnapshot>, expanded: bool) -> Option<OverlayGeometry> {
+fn geometry_for_game(
+    game: Option<&GameWindowSnapshot>,
+    expanded: bool,
+    state: &OverlayState,
+) -> Option<OverlayGeometry> {
     let game = game?;
     let client = game.client_rect?;
     if expanded {
         full_overlay_geometry(client)
     } else {
-        default_mini_overlay_geometry(client, game.dpi)
+        mini_overlay_geometry(
+            client,
+            game.dpi,
+            state.mini_size.load(Ordering::Acquire),
+            DEFAULT_MINI_LOGICAL_MARGIN,
+            MiniCorner::from_code(state.mini_corner.load(Ordering::Acquire)),
+        )
     }
 }
 
@@ -312,7 +329,7 @@ fn synchronize_with_game_locked(
     let expanded = state.expanded.load(Ordering::Acquire);
     let overlay = overlay_identity(window);
 
-    if let Some(geometry) = geometry_for_game(poll.game.as_ref(), expanded) {
+    if let Some(geometry) = geometry_for_game(poll.game.as_ref(), expanded, state) {
         apply_geometry_if_changed(window, state, geometry)?;
     }
 
@@ -368,6 +385,27 @@ fn set_overlay_mode(
     expanded: bool,
 ) -> Result<(), String> {
     apply_overlay_mode(&app, &state, expanded)
+}
+
+/// Sets the compact map's size and corner.
+///
+/// The window tracker re-applies geometry on its next poll, so this only has to
+/// record the preference. Size is clamped to something that stays usable and
+/// still fits a small game window.
+#[tauri::command]
+fn set_mini_overlay_layout(
+    state: State<'_, OverlayState>,
+    size: u32,
+    corner: u32,
+) -> Result<(), String> {
+    if corner > 3 {
+        return Err("corner must be 0..=3".to_owned());
+    }
+    state
+        .mini_size
+        .store(size.clamp(200, 900), Ordering::Release);
+    state.mini_corner.store(corner, Ordering::Release);
+    Ok(())
 }
 
 #[tauri::command]
@@ -884,6 +922,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             set_overlay_mode,
+            set_mini_overlay_layout,
             overlay_status,
             diagnostic_snapshot,
             diagnostic_status,

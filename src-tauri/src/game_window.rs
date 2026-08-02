@@ -143,6 +143,7 @@ pub fn mini_overlay_geometry(
     dpi: u32,
     logical_size: u32,
     logical_margin: u32,
+    corner: MiniCorner,
 ) -> Option<OverlayGeometry> {
     if client.is_empty() {
         return None;
@@ -162,13 +163,45 @@ pub fn mini_overlay_geometry(
         return None;
     }
 
-    let x_offset = client.width.saturating_sub(margin).saturating_sub(size);
+    let far_x = client.width.saturating_sub(margin).saturating_sub(size);
+    let far_y = client.height.saturating_sub(margin).saturating_sub(size);
+    let (x_offset, y_offset) = match corner {
+        MiniCorner::TopLeft => (margin, margin),
+        MiniCorner::TopRight => (far_x, margin),
+        MiniCorner::BottomLeft => (margin, far_y),
+        MiniCorner::BottomRight => (far_x, far_y),
+    };
     Some(OverlayGeometry {
         x: saturating_add_unsigned(client.x, x_offset),
-        y: saturating_add_unsigned(client.y, margin),
+        y: saturating_add_unsigned(client.y, y_offset),
         width: size,
         height: size,
     })
+}
+
+/// Which corner of the game window the compact map sits in.
+///
+/// Scrap Mechanic puts its quest tracker down the right-hand side, so the
+/// default overlaps it on smaller windows; moving the map is usually better
+/// than shrinking it to fit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MiniCorner {
+    TopLeft,
+    #[default]
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl MiniCorner {
+    pub fn from_code(code: u32) -> Self {
+        match code {
+            0 => Self::TopLeft,
+            2 => Self::BottomLeft,
+            3 => Self::BottomRight,
+            _ => Self::TopRight,
+        }
+    }
 }
 
 pub fn default_mini_overlay_geometry(client: ScreenRect, dpi: u32) -> Option<OverlayGeometry> {
@@ -177,6 +210,7 @@ pub fn default_mini_overlay_geometry(client: ScreenRect, dpi: u32) -> Option<Ove
         dpi,
         DEFAULT_MINI_LOGICAL_SIZE,
         DEFAULT_MINI_LOGICAL_MARGIN,
+        MiniCorner::default(),
     )
 }
 
@@ -561,7 +595,7 @@ mod tests {
 
     #[test]
     fn mini_geometry_clamps_to_tiny_game_window() {
-        let geometry = mini_overlay_geometry(ScreenRect::new(10, 20, 90, 60), 96, 420, 24)
+        let geometry = mini_overlay_geometry(ScreenRect::new(10, 20, 90, 60), 96, 420, 24, MiniCorner::default())
             .expect("clamped geometry");
 
         assert_eq!(

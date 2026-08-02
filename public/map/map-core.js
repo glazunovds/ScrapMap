@@ -592,6 +592,11 @@
       path
     ].filter(Boolean).join(" ").toLowerCase();
 
+    // Procedurally scattered filler: POI_LAKE_RANDOM, POI_ROAD_RANDOM and the
+    // like. Each is its own group, so they end up as hundreds of markers that
+    // repeat what the terrain already shows. Ruins and growlabs that happen to
+    // sit in a lake are named for what they are and stay real landmarks.
+    if (searchable.includes("random")) return "filler";
     if (searchable.includes("schematic")) return "schematic";
     if (searchable.includes("camp")) return "camp";
     if (searchable.includes("warehouse")) return "warehouse";

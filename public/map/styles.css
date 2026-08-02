@@ -589,6 +589,30 @@ body[data-profile-state="error"] .toggle-row {
   line-height: 1.35;
 }
 
+.mini-layout-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.mini-layout-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mini-layout-row select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(23, 27, 30, 0.86);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .toggle-row input {
   position: absolute;
   width: 1px;

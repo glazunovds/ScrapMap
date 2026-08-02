@@ -1468,6 +1468,19 @@
     requestProfileActivation(event.detail);
   });
 
+  // Placement of the compact map is a native window concern, so it goes
+  // straight through rather than into the profile store.
+  window.addEventListener("sm-minimap:mini-layout", (event) => {
+    const corner = Number(event.detail?.corner);
+    const size = Number(event.detail?.size);
+    if (!Number.isFinite(corner) || !Number.isFinite(size)) {
+      return;
+    }
+    invoke("set_mini_overlay_layout", { size, corner }).catch((error) => {
+      console.info("ScrapMap could not apply the mini-map layout", error);
+    });
+  });
+
   window.addEventListener("sm-minimap:fog-delta", (event) => {
     const job = currentMutationTarget(event.detail, true);
     if (!job) {
