@@ -1124,6 +1124,7 @@
   }
 
   async function activateProfileJob(job) {
+    note("job-started", { world: job.layout.sourceWorldId, generation: job.generation });
     try {
       const server = job.serverIdentity || (await serverIdentityForProfile(job));
       job.serverIdentity = server;
@@ -1338,6 +1339,7 @@
     };
     addFogToJob(job, activationOptions.carryFog);
     latestProfileJob = job;
+    note("requested", { world: layout.sourceWorldId, generation: job.generation });
     const switching = Boolean(job.fallbackProfileId);
     document.body.dataset.profileState = switching ? "switching" : "loading";
     renderProfileUi(profileUiSnapshot, switching ? "switching" : "loading");
@@ -1352,7 +1354,17 @@
         console.error("ScrapMap could not enter profile hydration mode", error);
       }
     }
-    enqueueStorage(() => activateProfileJob(job));
+    enqueueStorage(() =>
+      activateProfileJob(job).catch((error) => {
+        // A rejection here would stop the storage queue dead, taking every
+        // later job with it -- including the real world's.
+        note("job-rejected", {
+          world: job.layout.sourceWorldId,
+          error: String(error?.message || error)
+        });
+        throw error;
+      })
+    );
     return job;
   }
 
