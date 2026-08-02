@@ -16,13 +16,17 @@
   const categoryLabel = (definition) =>
     definition?.labelKey ? text(definition.labelKey, definition.label) : definition?.label || "";
 
+  /** A point-of-interest type name in the active language. */
+  const poiTypeName = (record) =>
+    record?.nameKey ? text(record.nameKey, record.name) : record?.name || "";
+
   /** A terrain name in the active language. Same shape as categoryLabel. */
   const terrainLabel = (style) =>
     style?.labelKey ? text(style.labelKey, style.label) : style?.label || "";
 
   const Core = window.SMMapCore;
   if (!Core) {
-    throw new Error("map-core.js не загружен.");
+    throw new Error(text("ERROR_CORE_MISSING"));
   }
 
   const terrainPalette = {
@@ -128,56 +132,56 @@
     schematic: {
       labelKey: "POI_CAT_SCHEMATIC",
       label: "Schematics / recipes",
-      shortLabel: "СХЕМЫ",
+      shortLabelKey: "POI_SHORT_SCHEMATIC", shortLabel: "SCHEM",
       color: "#5ce6f2",
       fill: "#15383d"
     },
     quest: {
       labelKey: "POI_CAT_QUEST",
       label: "Quest locations",
-      shortLabel: "КВЕСТ",
+      shortLabelKey: "POI_SHORT_QUEST", shortLabel: "QUEST",
       color: "#c995ff",
       fill: "#30203e"
     },
     camp: {
       labelKey: "POI_CAT_CAMP",
       label: "Camp spots",
-      shortLabel: "ЛАГЕРЬ",
+      shortLabelKey: "POI_SHORT_CAMP", shortLabel: "CAMP",
       color: "#f0a35d",
       fill: "#3b2819"
     },
     warehouse: {
       labelKey: "POI_CAT_WAREHOUSE",
       label: "Warehouses",
-      shortLabel: "СКЛАД",
+      shortLabelKey: "POI_SHORT_WAREHOUSE", shortLabel: "STORE",
       color: "#f07669",
       fill: "#3d211f"
     },
     service: {
       labelKey: "POI_CAT_STATION",
       label: "Stations and trader",
-      shortLabel: "СЕРВИС",
+      shortLabelKey: "POI_SHORT_STATION", shortLabel: "SERVICE",
       color: "#ffd45b",
       fill: "#3e3519"
     },
     dungeon: {
       labelKey: "POI_CAT_DUNGEON",
       label: "Dungeons",
-      shortLabel: "ДАНЖ",
+      shortLabelKey: "POI_SHORT_DUNGEON", shortLabel: "DUNG",
       color: "#6daaff",
       fill: "#1c2e45"
     },
     landmark: {
       labelKey: "POI_CAT_LANDMARK",
       label: "Other landmarks",
-      shortLabel: "ПРОЧЕЕ",
+      shortLabelKey: "POI_SHORT_LANDMARK", shortLabel: "OTHER",
       color: "#84d38c",
       fill: "#203724"
     },
     filler: {
       labelKey: "POI_CAT_FILLER",
       label: "Generator filler",
-      shortLabel: "ФОН",
+      shortLabelKey: "POI_SHORT_FILLER", shortLabel: "FILL",
       color: "#8d9a94",
       fill: "#242a28"
     }
@@ -1326,7 +1330,7 @@
     elements.canvas.dataset.lastStaticBuildCellDrawCalls =
       String(state.renderStats.lastStaticBuildCellDrawCalls);
     positionHoverHighlight(view);
-    elements.zoomLabel.textContent = `МАСШТАБ ${Math.round((view.scale / 43) * 100)}%`;
+    elements.zoomLabel.textContent = text("MAP_SCALE").replace("{value}", Math.round((view.scale / 43) * 100));
   }
 
   function scheduleRender() {
@@ -1548,7 +1552,7 @@
         }
       });
     } catch (error) {
-      showToast(`Не удалось прочитать исследованные клетки: ${error.message}`, true);
+      showToast(text("ERROR_READ_VISITED").replace("{error}", error.message), true);
     }
     return added;
   }
@@ -1568,7 +1572,7 @@
       try {
         window.localStorage.setItem(visitedStorageKey(worldId), JSON.stringify(payload));
       } catch (error) {
-        showToast(`Не удалось сохранить исследованные клетки: ${error.message}`, true);
+        showToast(text("ERROR_SAVE_VISITED").replace("{error}", error.message), true);
       }
     }, 180);
   }
@@ -1678,7 +1682,7 @@
     }
     showToast(
       discovered.length > 0
-        ? `Открыто клеток: ${discovered.length}`
+        ? text("TOAST_CELLS_REVEALED").replace("{count}", discovered.length)
         : text("TOAST_ALREADY_REVEALED"),
     );
     return discovered.length;
@@ -1695,7 +1699,7 @@
       const normalized = Core.normalizeMarkers(JSON.parse(saved));
       state.localMarkers = normalized.markers.map((marker) => ({ ...marker, local: true }));
     } catch (error) {
-      showToast(`Не удалось прочитать локальные метки: ${error.message}`, true);
+      showToast(text("ERROR_READ_MARKERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1721,7 +1725,7 @@
         }))
       }));
     } catch (error) {
-      showToast(`Не удалось сохранить локальные метки: ${error.message}`, true);
+      showToast(text("ERROR_SAVE_MARKERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1756,7 +1760,7 @@
         elements.fogToggle.checked = state.fogEnabled;
       }
     } catch (error) {
-      showToast(`Не удалось прочитать фильтры POI: ${error.message}`, true);
+      showToast(text("ERROR_READ_FILTERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1776,7 +1780,7 @@
         fogEnabled: state.fogEnabled
       }));
     } catch (error) {
-      showToast(`Не удалось сохранить фильтры POI: ${error.message}`, true);
+      showToast(text("ERROR_SAVE_FILTERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1821,7 +1825,7 @@
     if (!results.length) {
       const empty = document.createElement("p");
       empty.className = "poi-search-empty";
-      empty.textContent = "Ничего не найдено";
+      empty.textContent = text("POI_SEARCH_EMPTY");
       resultsElement.appendChild(empty);
       return;
     }
@@ -1842,7 +1846,7 @@
 
       const text = document.createElement("span");
       const name = document.createElement("strong");
-      name.textContent = record.name;
+      name.textContent = poiTypeName(record);
       const detail = document.createElement("small");
       const coordinates = record.representative;
       detail.textContent = `${coordinates.x} : ${coordinates.y} · ${record.nameEn}`;
@@ -2008,19 +2012,19 @@
     } else if (state.telemetryStatus === "unsupported") {
       elements.connectionLabel.textContent = text("STATUS_UNSUPPORTED_BUILD");
     } else if (state.telemetryStatus === "stale") {
-      elements.connectionLabel.textContent = "последняя известная позиция";
+      elements.connectionLabel.textContent = text("STATUS_LAST_KNOWN");
     } else if (state.telemetryStatus === "waiting") {
-      elements.connectionLabel.textContent = "ожидание телеметрии";
+      elements.connectionLabel.textContent = text("STATUS_AWAITING_TELEMETRY");
     } else if (state.telemetryLive) {
       const playerCount = telemetryPlayersInCurrentWorld().length;
       elements.connectionLabel.textContent =
         state.telemetryPollFailures > 8 || state.telemetryStale
-          ? "поток координат ожидает игру или мир"
-          : `координаты онлайн · игроков: ${playerCount}`;
+          ? text("STATUS_STREAM_WAITING")
+          : text("STATUS_COORDS_ONLINE").replace("{count}", playerCount);
     } else {
       elements.connectionLabel.textContent = state.layout
-        ? "локальный набор данных загружен"
-        : "ожидание layout";
+        ? text("STATUS_LOCAL_DATASET")
+        : text("STATUS_AWAITING_LAYOUT");
     }
   }
 
@@ -2051,7 +2055,7 @@
         `;
         button.querySelector("strong").textContent = marker.label;
         button.querySelector("small").textContent = `${marker.cellX} : ${marker.cellY}`;
-        button.querySelector("b").textContent = marker.local ? "МОЯ" : "ИМПОРТ";
+        button.querySelector("b").textContent = marker.local ? text("MARKER_MINE") : text("MARKER_IMPORTED");
         button.addEventListener("click", () => {
           if (!state.expanded) setExpanded(true);
           state.camera.x = marker.cellX + 0.5;
@@ -2090,10 +2094,10 @@
     state.markerMode = Boolean(enabled);
     elements.markerModeButton.setAttribute("aria-pressed", String(state.markerMode));
     elements.mapHint.textContent = state.markerMode
-      ? "Нажмите на клетку — поставить или убрать ×"
+      ? text("MAP_HINT_MARK_MODE")
       : state.expanded
-        ? "Перетаскивание — панорама · колесо — масштаб"
-        : "Двойной щелчок — поставить ×";
+        ? text("MAP_HINT_PAN_ZOOM")
+        : text("MAP_HINT_DOUBLE_CLICK");
     positionHoverHighlight();
   }
 
@@ -2104,18 +2108,18 @@
     );
     if (existingIndex >= 0) {
       state.localMarkers.splice(existingIndex, 1);
-      showToast(`Метка ${cellX}:${cellY} удалена`);
+      showToast(text("TOAST_MARKER_REMOVED").replace("{cell}", `${cellX}:${cellY}`));
     } else {
       state.localMarkers.push({
         id: `local-${Date.now()}-${cellX}-${cellY}`,
         cellX,
         cellY,
         kind: "x",
-        label: `Посещено ${cellX}:${cellY}`,
+        label: text("TOAST_CELL_VISITED").replace("{cell}", `${cellX}:${cellY}`),
         createdAt: new Date().toISOString(),
         local: true
       });
-      showToast(`Локальная метка поставлена на ${cellX}:${cellY}`);
+      showToast(text("TOAST_MARKER_PLACED").replace("{cell}", `${cellX}:${cellY}`));
     }
     saveLocalMarkers();
     invalidateStaticFrame();
@@ -2257,7 +2261,7 @@
       data.worldId &&
       data.worldId !== state.layout.worldId
     ) {
-      throw new TypeError(`${kind}: worldId отличается от текущего layout`);
+      throw new TypeError(text("ERROR_WORLD_MISMATCH").replace("{kind}", kind));
     }
   }
 
@@ -2339,7 +2343,7 @@
       state.telemetryStale = false;
       state.telemetryPollFailures = 0;
     }
-    elements.telemetryFileStatus.textContent = sourceName || "обновлено";
+    elements.telemetryFileStatus.textContent = sourceName || text("STATUS_UPDATED");
     elements.telemetryFileStatus.classList.add("is-loaded");
     updateSummary();
     scheduleRender();
@@ -2373,7 +2377,7 @@
         return;
       }
       const payload = JSON.parse(text);
-      applyTelemetry(payload, "автообновление", { live: true });
+      applyTelemetry(payload, text("STATUS_AUTO_REFRESH"), { live: true });
       state.telemetrySignature = text;
     } catch {
       state.telemetryPollFailures += 1;
@@ -2458,7 +2462,7 @@
     const markers = Core.normalizeMarkers(payload);
     ensureWorldMatch(markers, "Markers");
     state.importedMarkers = markers.markers.map((marker) => ({ ...marker, local: false }));
-    elements.markersFileStatus.textContent = sourceName || `${markers.markers.length} меток`;
+    elements.markersFileStatus.textContent = sourceName || text("STATUS_MARKER_COUNT").replace("{count}", markers.markers.length);
     elements.markersFileStatus.classList.add("is-loaded");
     invalidateStaticFrame();
     updateSummary();
@@ -2510,7 +2514,7 @@
         cellX,
         cellY,
         kind: String(markerKind || "x"),
-        label: String(entry.label || `Метка ${cellX}:${cellY}`),
+        label: String(entry.label || text("MARKER_DEFAULT_NAME").replace("{cell}", `${cellX}:${cellY}`)),
         createdAt: entry.createdAt || null,
         local
       });
@@ -2534,7 +2538,7 @@
 
   function beginProfileHydration(sourceWorldId) {
     if (!state.layout || String(sourceWorldId || "") !== state.layout.worldId) {
-      throw new TypeError("Нельзя начать загрузку профиля для другого sourceWorldId.");
+      throw new TypeError(text("ERROR_PROFILE_OTHER_WORLD"));
     }
     state.profileHydrationStatus = "pending";
     state.pendingVisited.clear();
@@ -2547,10 +2551,10 @@
 
   function hydrateProfileState(snapshot, options) {
     if (!state.layout) {
-      throw new TypeError("Нельзя восстановить профиль до загрузки layout.");
+      throw new TypeError(text("ERROR_PROFILE_NO_LAYOUT"));
     }
     if (!snapshot || typeof snapshot !== "object") {
-      throw new TypeError("Снимок профиля должен быть объектом.");
+      throw new TypeError(text("ERROR_SNAPSHOT_NOT_OBJECT"));
     }
     const profile = snapshot.profile && typeof snapshot.profile === "object"
       ? snapshot.profile
@@ -2560,11 +2564,11 @@
     const sourceWorldId = String(profile.sourceWorldId || snapshot.sourceWorldId || "").trim();
     if (!profileKey || !worldFingerprint || !sourceWorldId) {
       state.profileHydrationStatus = "error";
-      throw new TypeError("Снимок профиля не содержит profileKey, worldFingerprint или sourceWorldId.");
+      throw new TypeError(text("ERROR_SNAPSHOT_INCOMPLETE"));
     }
     if (sourceWorldId !== state.layout.worldId) {
       state.profileHydrationStatus = "error";
-      throw new TypeError("Профиль относится к другому sourceWorldId.");
+      throw new TypeError(text("ERROR_SNAPSHOT_OTHER_WORLD"));
     }
 
     const hydrationOptions = options && typeof options === "object" ? options : {};
@@ -2642,14 +2646,14 @@
 
   function applyBundle(bundle, sourceName) {
     if (!bundle || typeof bundle !== "object") {
-      throw new TypeError("Bundle должен быть объектом.");
+      throw new TypeError(text("ERROR_BUNDLE_NOT_OBJECT"));
     }
     if (bundle.layout) applyLayout(bundle.layout, sourceName);
     if (bundle.telemetry) applyTelemetry(bundle.telemetry, sourceName);
     if (bundle.visited) applyVisited(bundle.visited, sourceName, true);
     if (bundle.markers) applyMarkers(bundle.markers, sourceName);
     if (!bundle.layout && !bundle.telemetry && !bundle.visited && !bundle.markers) {
-      throw new TypeError("В bundle не найдены layout, telemetry, visited или markers.");
+      throw new TypeError(text("ERROR_BUNDLE_EMPTY"));
     }
   }
 
@@ -2658,7 +2662,7 @@
     try {
       return JSON.parse(text);
     } catch (error) {
-      throw new SyntaxError(`${file.name}: некорректный JSON (${error.message}).`);
+      throw new SyntaxError(text("ERROR_BAD_JSON").replace("{file}", file.name).replace("{error}", error.message));
     }
   }
 
@@ -2673,14 +2677,14 @@
         else if (kind === "telemetry") applyTelemetry(payload, file.name);
         else if (kind === "visited") applyVisited(payload, file.name, true);
         else if (kind === "markers") applyMarkers(payload, file.name);
-        else throw new TypeError(`${file.name}: тип данных не распознан.`);
+        else throw new TypeError(text("ERROR_UNKNOWN_KIND").replace("{file}", file.name));
         loaded += 1;
       } catch (error) {
         showToast(error.message, true);
       }
     }
     if (loaded) {
-      showToast(`Загружено файлов: ${loaded}`);
+      showToast(text("TOAST_FILES_LOADED").replace("{count}", loaded));
     }
   }
 
@@ -2775,7 +2779,7 @@
             cellX: -3,
             cellY: 2,
             kind: "x",
-            label: "Вернуться за лутом",
+            label: text("DEMO_MARKER_LOOT"),
             createdAt: "2026-07-26T18:20:00Z"
           }
         ]
@@ -2785,9 +2789,9 @@
 
   function loadDemo() {
     state.visited.clear();
-    applyBundle(buildDemoBundle(), "встроенное демо");
-    elements.connectionLabel.textContent = "демонстрационные данные";
-    showToast("Демонстрационный мир загружен");
+    applyBundle(buildDemoBundle(), text("SOURCE_BUILT_IN_DEMO"));
+    elements.connectionLabel.textContent = text("HEADER_CONNECTION_DEMO");
+    showToast(text("TOAST_DEMO_LOADED"));
   }
 
   elements.expandButton.addEventListener("click", () => setExpanded(!state.expanded));
@@ -2878,7 +2882,7 @@
 
   elements.schematicOnlyButton.addEventListener("click", () => {
     setPoiCategories(["schematic"]);
-    showToast("На карте оставлены только схемоботы");
+    showToast(text("TOAST_SCHEMATICS_ONLY"));
   });
 
   elements.hideAllPoiButton.addEventListener("click", () => {
@@ -2908,7 +2912,7 @@
 
   elements.clearMarkersButton.addEventListener("click", () => {
     if (!state.localMarkers.length) {
-      showToast("Локальных меток для удаления нет");
+      showToast(text("TOAST_NO_MARKERS"));
       return;
     }
     state.localMarkers = [];
@@ -2916,7 +2920,7 @@
     invalidateStaticFrame();
     updateSummary();
     scheduleRender();
-    showToast("Локальные метки этого мира удалены");
+    showToast(text("TOAST_MARKERS_CLEARED"));
   });
 
   elements.layoutInput.addEventListener("change", (event) => loadFiles(event.target.files, "layout"));
@@ -3059,7 +3063,7 @@
       applyLayout(layout, "SMMinimap API");
     },
     updateTelemetry(telemetry, options) {
-      applyTelemetry(telemetry, "встроенный канал", options);
+      applyTelemetry(telemetry, text("SOURCE_EMBEDDED_CHANNEL"), options);
     },
     updateVisited(visited, options) {
       applyVisited(visited, "SMMinimap API", !options || options.merge !== false);
@@ -3166,9 +3170,9 @@
   const bootstrapBundle = window.SMMinimapBootstrapData;
   if (bootstrapBundle && typeof bootstrapBundle === "object" && bootstrapBundle.layout) {
     state.visited.clear();
-    applyBundle(bootstrapBundle, "локальный runtime bundle");
-    elements.connectionLabel.textContent = "локальный мир загружен";
-    showToast("Карта локального мира загружена");
+    applyBundle(bootstrapBundle, text("SOURCE_LOCAL_BUNDLE"));
+    elements.connectionLabel.textContent = text("SOURCE_LOCAL_WORLD");
+    showToast(text("TOAST_LOCAL_WORLD"));
   } else {
     loadDemo();
   }

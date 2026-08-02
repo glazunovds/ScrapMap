@@ -34,13 +34,13 @@
     );
     const browserProfileSummary = document.getElementById?.("profileSummary");
     if (browserProfileButton) {
-      browserProfileButton.textContent = "БРАУЗЕР";
+      browserProfileButton.textContent = text("BADGE_BROWSER");
       browserProfileButton.disabled = true;
       browserProfileButton.removeAttribute("aria-haspopup");
       browserProfileButton.removeAttribute("aria-controls");
     }
     if (browserProfileSummary) {
-      browserProfileSummary.textContent = "Данные хранятся в этом браузере.";
+      browserProfileSummary.textContent = text("SUMMARY_BROWSER");
     }
     return;
   }
@@ -343,19 +343,19 @@
       const text = document.createElement("span");
       const name = document.createElement("strong");
       name.textContent =
-        boundedText(candidate.displayName, 80, "") || "Ручной профиль";
+        boundedText(candidate.displayName, 80, "") || text("PROFILE_MANUAL");
       const opened = document.createElement("small");
       const date = new Date(Number(candidate.lastOpenedAtMs));
       opened.textContent = Number.isFinite(date.getTime())
-        ? `Открывался ${date.toLocaleDateString("ru-RU")}`
-        : "Сохранённый профиль";
+        ? text("PROFILE_LAST_OPENED").replace("{date}", date.toLocaleDateString())
+        : text("PROFILE_SAVED");
       text.append(name, opened);
 
       const action = document.createElement("b");
       action.textContent =
         candidate.profileKey === snapshot?.profile?.profileKey
-          ? "АКТИВЕН"
-          : "ВЫБРАТЬ";
+          ? text("PROFILE_ACTIVE")
+          : text("PROFILE_CHOOSE");
       button.append(text, action);
       button.addEventListener("click", () => {
         window.ScrapMapProfiles?.select(candidate.fallbackProfileId);
@@ -1289,7 +1289,7 @@
         document.body.dataset.profileState = "error";
         renderProfileUi(job.snapshot, "error");
         setProfileDialogStatus(
-          "Не удалось переключить профиль. Повторите попытку.",
+          text("ERROR_PROFILE_SWITCH"),
           true
         );
       }
@@ -1436,7 +1436,7 @@
       carryFog
     });
     nextJob.closeDialogOnReady = true;
-    setProfileDialogStatus("Переключаем профиль…");
+    setProfileDialogStatus(text("STATUS_SWITCHING_PROFILE"));
     return nextJob;
   }
 
@@ -1458,7 +1458,7 @@
       [...name].length > 80 ||
       [...name].some((character) => /[\u0000-\u001f\u007f]/.test(character))
     ) {
-      throw new TypeError("Введите название профиля длиной от 1 до 80 символов.");
+      throw new TypeError(text("ERROR_PROFILE_NAME"));
     }
     const randomId =
       typeof window.crypto?.randomUUID === "function"
@@ -1566,12 +1566,12 @@
       .then((result) => {
         if (note) {
           note.textContent =
-            `Подготовлено объектов: ${result?.targets ?? 0}. ` +
-            "Перезагрузите мир, чтобы начать съёмку.";
+            text("POI_CAPTURE_PREPARED").replace("{count}", result?.targets ?? 0) +
+            text("POI_CAPTURE_RELOAD");
         }
       })
       .catch((error) => {
-        if (note) note.textContent = `Не удалось подготовить съёмку: ${error}`;
+        if (note) note.textContent = text("ERROR_POI_CAPTURE").replace("{error}", error);
       })
       .finally(() => {
         if (button) button.disabled = false;

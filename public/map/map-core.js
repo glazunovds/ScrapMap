@@ -13,55 +13,55 @@
   const ROAD_BITS = { n: 1, e: 2, s: 4, w: 8 };
   const POI_TYPE_CATALOG = Object.freeze({
     schematic: {
-      name: "Схемобот",
+      nameKey: "POI_TYPE_SCHEMATIC", name: "Schematic bot",
       nameEn: "Schematicbot",
       aliases: ["схема", "рецепт", "schematic", "recipe"],
       glyph: "S"
     },
     mechanic: {
-      name: "Механик",
+      nameKey: "POI_TYPE_MECHANIC", name: "Mechanic",
       nameEn: "Mechanic",
       aliases: ["станция механика", "mechanic station"],
       glyph: "M"
     },
     packing: {
-      name: "Упаковочная станция",
+      nameKey: "POI_TYPE_PACKING", name: "Packing station",
       nameEn: "Packing station",
       aliases: ["упаковка", "packing"],
       glyph: "P"
     },
     warehouse: {
-      name: "Склад",
+      nameKey: "POI_TYPE_WAREHOUSE", name: "Warehouse",
       nameEn: "Warehouse",
       aliases: ["storage", "склад"],
       glyph: "W"
     },
     camp: {
-      name: "Кемпинг-спот",
+      nameKey: "POI_TYPE_CAMP", name: "Camp spot",
       nameEn: "Camp spot",
       aliases: ["лагерь", "camp"],
       glyph: "C"
     },
     quest: {
-      name: "Квестовое место",
+      nameKey: "POI_TYPE_QUEST", name: "Quest location",
       nameEn: "Quest location",
       aliases: ["квест", "quest"],
       glyph: "!"
     },
     lab: {
-      name: "Лаборатория",
+      nameKey: "POI_TYPE_LAB", name: "Laboratory",
       nameEn: "Laboratory",
       aliases: ["лаборатория", "lab"],
       glyph: "L"
     },
     ruin: {
-      name: "Руины",
+      nameKey: "POI_TYPE_RUIN", name: "Ruins",
       nameEn: "Ruins",
       aliases: ["руины", "ruin"],
       glyph: "R"
     },
     dungeon: {
-      name: "Подземелье",
+      nameKey: "POI_TYPE_DUNGEON", name: "Dungeon",
       nameEn: "Dungeon",
       aliases: ["данж", "underground", "dungeon"],
       glyph: "D"
@@ -279,7 +279,7 @@
     const name = String(source.name || "").trim();
     if (name) return name;
     const id = String(source.id || "").trim();
-    return id ? `Игрок ${id}` : "Игрок";
+    return id ? `Player ${id}` : "Player";
   }
 
   function staticFrameKey(options) {
@@ -436,7 +436,7 @@
   function poiTypeDefinition(poi) {
     const kind = String(poi?.kind || poi?.type || "poi").toLowerCase();
     return POI_TYPE_CATALOG[kind] || {
-      name: String(poi?.label || kind || "Точка интереса"),
+      name: String(poi?.label || kind || "Point of interest"),
       nameEn: kind || "POI",
       aliases: [],
       glyph: kind.charAt(0).toUpperCase() || "•"
@@ -559,7 +559,7 @@
     if (lower.includes("schematicstation")) {
       return {
         kind: "schematic",
-        label: "Схемобот — обмен схем на рецепты",
+        label: "Schematic bot — trade schematics for recipes",
         code: "schematic-station",
         category: "schematic"
       };
@@ -571,7 +571,7 @@
     ) {
       return {
         kind: "quest",
-        label: tileLabel(path) || "Квестовое место",
+        label: tileLabel(path) || "Quest location",
         code: null,
         category: "quest"
       };
@@ -669,28 +669,28 @@
   function normalizeLayout(payload) {
     const source = unwrap(payload, "layout");
     if (!source || typeof source !== "object") {
-      throw new TypeError("Layout должен быть JSON-объектом.");
+      throw new TypeError("Layout must be a JSON object.");
     }
     if (!Array.isArray(source.cells)) {
-      throw new TypeError("Layout должен содержать массив cells.");
+      throw new TypeError("Layout must contain a cells array.");
     }
 
     const warnings = [];
     const seen = new Set();
     const cells = source.cells.map((rawCell, index) => {
       if (!rawCell || typeof rawCell !== "object") {
-        throw new TypeError(`Некорректная клетка layout.cells[${index}].`);
+        throw new TypeError(`Invalid cell layout.cells[${index}].`);
       }
 
       const x = integer(rawCell.x, NaN);
       const y = integer(rawCell.y, NaN);
       if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        throw new TypeError(`У клетки layout.cells[${index}] отсутствуют целые x/y.`);
+        throw new TypeError(`Cell layout.cells[${index}] has no integer x/y.`);
       }
 
       const key = cellKey(x, y);
       if (seen.has(key)) {
-        warnings.push(`Повторная клетка ${key}; будет использована последняя.`);
+        warnings.push(`Duplicate cell ${key}; the last one wins.`);
       }
       seen.add(key);
 
@@ -747,7 +747,7 @@
     });
     const cellSize = finiteNumber(source.cellSize, 64);
     if (!(cellSize > 0)) {
-      throw new RangeError("layout.cellSize должен быть больше нуля.");
+      throw new RangeError("layout.cellSize must be greater than zero.");
     }
 
     return {
@@ -766,7 +766,7 @@
   function normalizeTelemetry(payload) {
     const source = unwrap(payload, "telemetry");
     if (!source || typeof source !== "object") {
-      throw new TypeError("Telemetry должен быть JSON-объектом.");
+      throw new TypeError("Telemetry must be a JSON object.");
     }
 
     const sourcePlayers = Array.isArray(source.players) ? source.players : [];
@@ -776,7 +776,7 @@
       sourcePlayers[0] ||
       source;
     if (!primarySource || typeof primarySource !== "object") {
-      throw new TypeError("Telemetry должен содержать объект player.");
+      throw new TypeError("Telemetry must contain a player object.");
     }
 
     const payloadWorldId = source.payloadWorldId == null
@@ -791,10 +791,10 @@
         Number.isFinite(Number(player[field]))
       );
       const fallbackName = localFallback
-        ? "Вы"
+        ? "You"
         : id == null
-          ? `Игрок ${index + 1}`
-          : `Игрок ${id}`;
+          ? `Player ${index + 1}`
+          : `Player ${id}`;
       return {
         id,
         name: String(player.name || player.playerName || fallbackName).slice(0, 80),
@@ -871,7 +871,7 @@
     }
 
     if (!Array.isArray(entries)) {
-      throw new TypeError("Visited должен быть массивом или объектом с массивом visited.");
+      throw new TypeError("Visited must be an array, or an object with a visited array.");
     }
 
     const keys = new Set();
@@ -906,7 +906,7 @@
     }
 
     if (!Array.isArray(entries)) {
-      throw new TypeError("Markers должен быть массивом или объектом с массивом markers.");
+      throw new TypeError("Markers must be an array, or an object with a markers array.");
     }
 
     const markers = entries
@@ -922,7 +922,7 @@
           cellX,
           cellY,
           kind: String(entry.kind || "x"),
-          label: String(entry.label || `Метка ${cellX}:${cellY}`),
+          label: String(entry.label || `Marker ${cellX}:${cellY}`),
           createdAt: entry.createdAt || null,
           local: Boolean(entry.local)
         };
