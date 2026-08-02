@@ -46,7 +46,11 @@ const MIN_CROP: f32 = 0.2;
 /// Keyed on this rather than on file timestamps: a completed sweep clears its
 /// request and re-applying the patch touches the Lua, so neither is a usable
 /// signal for "this photograph was taken by the current code".
-const CAPTURE_GENERATION: u32 = 1;
+///
+/// Raised to 2 because replayed `ready` lines overwrote an unknown subset of
+/// generation 1 with screenshots of the main menu. Which ones is not
+/// recoverable, so all of them are retaken.
+const CAPTURE_GENERATION: u32 = 2;
 const STATE_FILE: &str = "photo-state.json";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -278,8 +282,14 @@ impl ShotWatcher {
             return Vec::new();
         };
         if self.path.as_ref() != Some(&latest) {
+            // Start at the end of a log the first time it is seen, never at the
+            // beginning. A `ready` line describes a pose the game held at some
+            // moment; replaying an old one photographs whatever happens to be on
+            // screen now. Restarting the overlay used to do exactly that -- it
+            // re-read a whole session and overwrote good photographs with the
+            // main menu, an exit dialog, and first-person views.
             self.path = Some(latest.clone());
-            self.offset = 0;
+            self.offset = fs::metadata(&latest).map(|data| data.len()).unwrap_or(0);
         }
         let Ok(mut file) = fs::File::open(&latest) else {
             return Vec::new();
@@ -576,6 +586,48 @@ mod tests {
         assert_eq!(absurd.2, MIN_CROP);
         let backwards = parse_ready("SCRAPMAP_SHOT_V1|ready|camp|1|2|1|64.00|8.0").unwrap();
         assert_eq!(backwards.2, 1.0);
+    }
+
+    #[test]
+    fn a_watcher_ignores_everything_written_before_it_attached() {
+        // A `ready` line describes a pose the game held at the time. Acting on
+        // an old one photographs whatever is on screen now -- which is how a
+        // restart of the overlay replaced good photographs with the main menu.
+        let root = std::env::temp_dir().join(format!(
+            "scrapmap-watcher-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let log = root.join("game-20260101-010101.log");
+        fs::write(
+            &log,
+            "SCRAPMAP_SHOT_V1|ready|old-tile|1|2|1|64.00|64.00|55.4|atlas|9|0
+",
+        )
+        .unwrap();
+
+        let mut watcher = ShotWatcher::default();
+        assert!(
+            watcher.poll(&root).is_empty(),
+            "history must not be replayed"
+        );
+
+        // Anything appended afterwards is live and must be acted on.
+        use std::io::Write as _;
+        let mut file = fs::OpenOptions::new().append(true).open(&log).unwrap();
+        file.write_all(b"SCRAPMAP_SHOT_V1|ready|new-tile|3|4|2|128.00|128.00|110.9|atlas|9|0
+")
+            .unwrap();
+        drop(file);
+
+        let events = watcher.poll(&root);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ShotEvent::Ready { uuid, .. } if uuid == "new-tile"));
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
