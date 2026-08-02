@@ -86,6 +86,55 @@ for (const absolutePath of await collectFiles(root)) {
   }
 }
 
+// The interface strings are only as good as their keys. Two failures shipped
+// today that a build cannot catch: a key with no entry renders as the key, and
+// a call in a scope where the helper is shadowed throws at runtime -- which
+// aborted the layout and left the map permanently unresolved.
+{
+  const english = JSON.parse(
+    await fs.readFile(new URL("../public/map/locales/en.json", import.meta.url), "utf8"),
+  );
+  const russian = JSON.parse(
+    await fs.readFile(new URL("../public/map/locales/ru.json", import.meta.url), "utf8"),
+  );
+
+  for (const key of Object.keys(english)) {
+    if (!(key in russian)) violations.push(`ru.json: no entry for ${key}`);
+  }
+  for (const key of Object.keys(russian)) {
+    if (!(key in english)) violations.push(`en.json: no entry for ${key}, which is the fallback`);
+  }
+
+  for (const relative of ["public/map/app.js", "public/map/overlay-bridge.js"]) {
+    const source = await fs.readFile(new URL(`../${relative}`, import.meta.url), "utf8");
+
+    for (const [, key] of source.matchAll(/\btr\("([A-Z0-9_]+)"/g)) {
+      if (!(key in english)) violations.push(`${relative}: tr("${key}") has no entry in en.json`);
+    }
+
+    // A local binding of the helper's name turns every call in that scope into
+    // a call on something else -- a DOM node, in the case that shipped.
+    if (/(?:const|let|var)\s+tr\s*=(?!\s*\(key)/.test(source)) {
+      violations.push(`${relative}: something shadows the tr() string helper`);
+    }
+  }
+
+  for (const relative of ["public/map/index.html"]) {
+    const markup = await fs.readFile(new URL(`../${relative}`, import.meta.url), "utf8");
+    for (const [, key] of markup.matchAll(/data-i18n="([A-Z0-9_]+)"/g)) {
+      if (!(key in english)) violations.push(`${relative}: data-i18n="${key}" has no entry`);
+    }
+    for (const [, attrs] of markup.matchAll(/data-i18n-attr="([^"]+)"/g)) {
+      for (const pair of attrs.split(",")) {
+        const key = pair.split(":")[1]?.trim();
+        if (key && !(key in english)) {
+          violations.push(`${relative}: data-i18n-attr key ${key} has no entry`);
+        }
+      }
+    }
+  }
+}
+
 if (violations.length > 0) {
   process.stderr.write(
     `Repository hygiene check failed:\n${violations

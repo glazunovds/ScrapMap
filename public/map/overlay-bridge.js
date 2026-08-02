@@ -3,7 +3,7 @@
 
   /** Interface string by key. Falls back to the key so a missing i18n layer
    *  degrades to something identifiable rather than to blank UI. */
-  const text = (key) => window.SMText?.t(key) ?? key;
+  const tr = (key) => window.SMText?.t(key) ?? key;
 
   /** Writes a line to ui.log. A release build has no console to read. */
   let noteSequence = 0;
@@ -34,13 +34,13 @@
     );
     const browserProfileSummary = document.getElementById?.("profileSummary");
     if (browserProfileButton) {
-      browserProfileButton.textContent = text("BADGE_BROWSER");
+      browserProfileButton.textContent = tr("BADGE_BROWSER");
       browserProfileButton.disabled = true;
       browserProfileButton.removeAttribute("aria-haspopup");
       browserProfileButton.removeAttribute("aria-controls");
     }
     if (browserProfileSummary) {
-      browserProfileSummary.textContent = text("SUMMARY_BROWSER");
+      browserProfileSummary.textContent = tr("SUMMARY_BROWSER");
     }
     return;
   }
@@ -295,33 +295,33 @@
     const profile = snapshot?.profile || {};
     if (state === "loading" || state === "switching") {
       return {
-        badge: text(state === "switching" ? "BADGE_SWITCHING" : "BADGE_RESOLVING"),
-        summary: text("SESSION_RESOLVING_SUMMARY")
+        badge: tr(state === "switching" ? "BADGE_SWITCHING" : "BADGE_RESOLVING"),
+        summary: tr("SESSION_RESOLVING_SUMMARY")
       };
     }
     if (state === "error") {
       return {
-        badge: text("BADGE_ERROR"),
-        summary: text("SUMMARY_ERROR")
+        badge: tr("BADGE_ERROR"),
+        summary: tr("SUMMARY_ERROR")
       };
     }
     if (profile.needsManualDisambiguation === true) {
       return {
-        badge: text("BADGE_SERVER_UNKNOWN"),
-        summary: text("SUMMARY_SERVER_UNKNOWN")
+        badge: tr("BADGE_SERVER_UNKNOWN"),
+        summary: tr("SUMMARY_SERVER_UNKNOWN")
       };
     }
     if (profile.scopeKind === "local") {
-      return { badge: text("BADGE_LOCAL"), summary: text("SUMMARY_LOCAL") };
+      return { badge: tr("BADGE_LOCAL"), summary: tr("SUMMARY_LOCAL") };
     }
     if (profile.identityQuality === "manual") {
       return {
-        badge: text("BADGE_MANUAL"),
+        badge: tr("BADGE_MANUAL"),
         summary:
-          boundedText(profile.displayName, 80) || text("SUMMARY_MANUAL")
+          boundedText(profile.displayName, 80) || tr("SUMMARY_MANUAL")
       };
     }
-    return { badge: text("BADGE_SERVER"), summary: text("SUMMARY_SERVER") };
+    return { badge: tr("BADGE_SERVER"), summary: tr("SUMMARY_SERVER") };
   }
 
   function renderProfileCandidates(snapshot) {
@@ -331,7 +331,7 @@
     if (!profileCandidates.length) {
       const empty = document.createElement("p");
       empty.className = "profile-candidate-empty";
-      empty.textContent = text("PROFILE_NONE_YET");
+      empty.textContent = tr("PROFILE_NONE_YET");
       list.appendChild(empty);
       return;
     }
@@ -348,19 +348,19 @@
       const text = document.createElement("span");
       const name = document.createElement("strong");
       name.textContent =
-        boundedText(candidate.displayName, 80, "") || text("PROFILE_MANUAL");
+        boundedText(candidate.displayName, 80, "") || tr("PROFILE_MANUAL");
       const opened = document.createElement("small");
       const date = new Date(Number(candidate.lastOpenedAtMs));
       opened.textContent = Number.isFinite(date.getTime())
-        ? text("PROFILE_LAST_OPENED").replace("{date}", date.toLocaleDateString())
-        : text("PROFILE_SAVED");
+        ? tr("PROFILE_LAST_OPENED").replace("{date}", date.toLocaleDateString())
+        : tr("PROFILE_SAVED");
       text.append(name, opened);
 
       const action = document.createElement("b");
       action.textContent =
         candidate.profileKey === snapshot?.profile?.profileKey
-          ? text("PROFILE_ACTIVE")
-          : text("PROFILE_CHOOSE");
+          ? tr("PROFILE_ACTIVE")
+          : tr("PROFILE_CHOOSE");
       button.append(text, action);
       button.addEventListener("click", () => {
         window.ScrapMapProfiles?.select(candidate.fallbackProfileId);
@@ -393,8 +393,8 @@
     }
     if (profileElements.copy) {
       profileElements.copy.textContent = manualAllowed
-        ? text("PROFILE_DIALOG_COPY")
-        : text("PROFILE_AUTOMATIC");
+        ? tr("PROFILE_DIALOG_COPY")
+        : tr("PROFILE_AUTOMATIC");
     }
     renderProfileCandidates(profileUiSnapshot);
   }
@@ -1294,7 +1294,7 @@
         document.body.dataset.profileState = "error";
         renderProfileUi(job.snapshot, "error");
         setProfileDialogStatus(
-          text("ERROR_PROFILE_SWITCH"),
+          tr("ERROR_PROFILE_SWITCH"),
           true
         );
       }
@@ -1441,7 +1441,7 @@
       carryFog
     });
     nextJob.closeDialogOnReady = true;
-    setProfileDialogStatus(text("STATUS_SWITCHING_PROFILE"));
+    setProfileDialogStatus(tr("STATUS_SWITCHING_PROFILE"));
     return nextJob;
   }
 
@@ -1463,7 +1463,7 @@
       [...name].length > 80 ||
       [...name].some((character) => /[\u0000-\u001f\u007f]/.test(character))
     ) {
-      throw new TypeError(text("ERROR_PROFILE_NAME"));
+      throw new TypeError(tr("ERROR_PROFILE_NAME"));
     }
     const randomId =
       typeof window.crypto?.randomUUID === "function"
@@ -1571,12 +1571,12 @@
       .then((result) => {
         if (note) {
           note.textContent =
-            text("POI_CAPTURE_PREPARED").replace("{count}", result?.targets ?? 0) +
-            text("POI_CAPTURE_RELOAD");
+            tr("POI_CAPTURE_PREPARED").replace("{count}", result?.targets ?? 0) +
+            tr("POI_CAPTURE_RELOAD");
         }
       })
       .catch((error) => {
-        if (note) note.textContent = text("ERROR_POI_CAPTURE").replace("{error}", error);
+        if (note) note.textContent = tr("ERROR_POI_CAPTURE").replace("{error}", error);
       })
       .finally(() => {
         if (button) button.disabled = false;

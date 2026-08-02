@@ -10,23 +10,23 @@
    * does not have, so every call site here was a ReferenceError, which aborted
    * applyLayout before it announced the world and left the profile unresolved.
    */
-  const text = (key, fallback) => window.SMText?.t(key, fallback) ?? fallback ?? key;
+  const tr = (key, fallback) => window.SMText?.t(key, fallback) ?? fallback ?? key;
 
   /** A point-of-interest category name in the active language. */
   const categoryLabel = (definition) =>
-    definition?.labelKey ? text(definition.labelKey, definition.label) : definition?.label || "";
+    definition?.labelKey ? tr(definition.labelKey, definition.label) : definition?.label || "";
 
   /** A point-of-interest type name in the active language. */
   const poiTypeName = (record) =>
-    record?.nameKey ? text(record.nameKey, record.name) : record?.name || "";
+    record?.nameKey ? tr(record.nameKey, record.name) : record?.name || "";
 
   /** A terrain name in the active language. Same shape as categoryLabel. */
   const terrainLabel = (style) =>
-    style?.labelKey ? text(style.labelKey, style.label) : style?.label || "";
+    style?.labelKey ? tr(style.labelKey, style.label) : style?.label || "";
 
   const Core = window.SMMapCore;
   if (!Core) {
-    throw new Error(text("ERROR_CORE_MISSING"));
+    throw new Error(tr("ERROR_CORE_MISSING"));
   }
 
   const terrainPalette = {
@@ -1233,10 +1233,10 @@
     context.fillStyle = "#dce1dc";
     context.textAlign = "center";
     context.font = "600 16px Segoe UI, sans-serif";
-    context.fillText(text("STATUS_NO_LAYOUT"), state.canvasWidth / 2, state.canvasHeight / 2 - 8);
+    context.fillText(tr("STATUS_NO_LAYOUT"), state.canvasWidth / 2, state.canvasHeight / 2 - 8);
     context.fillStyle = "#7f8988";
     context.font = "11px Segoe UI, sans-serif";
-    context.fillText(text("STATUS_OPEN_DATA"), state.canvasWidth / 2, state.canvasHeight / 2 + 17);
+    context.fillText(tr("STATUS_OPEN_DATA"), state.canvasWidth / 2, state.canvasHeight / 2 + 17);
     context.restore();
   }
 
@@ -1330,7 +1330,7 @@
     elements.canvas.dataset.lastStaticBuildCellDrawCalls =
       String(state.renderStats.lastStaticBuildCellDrawCalls);
     positionHoverHighlight(view);
-    elements.zoomLabel.textContent = text("MAP_SCALE").replace("{value}", Math.round((view.scale / 43) * 100));
+    elements.zoomLabel.textContent = tr("MAP_SCALE").replace("{value}", Math.round((view.scale / 43) * 100));
   }
 
   function scheduleRender() {
@@ -1552,7 +1552,7 @@
         }
       });
     } catch (error) {
-      showToast(text("ERROR_READ_VISITED").replace("{error}", error.message), true);
+      showToast(tr("ERROR_READ_VISITED").replace("{error}", error.message), true);
     }
     return added;
   }
@@ -1572,7 +1572,7 @@
       try {
         window.localStorage.setItem(visitedStorageKey(worldId), JSON.stringify(payload));
       } catch (error) {
-        showToast(text("ERROR_SAVE_VISITED").replace("{error}", error.message), true);
+        showToast(tr("ERROR_SAVE_VISITED").replace("{error}", error.message), true);
       }
     }, 180);
   }
@@ -1660,7 +1660,7 @@
    */
   function revealAllCells() {
     if (!state.layout) {
-      showToast(text("TOAST_MAP_NOT_LOADED"), true);
+      showToast(tr("TOAST_MAP_NOT_LOADED"), true);
       return 0;
     }
     const discovered = [];
@@ -1682,8 +1682,8 @@
     }
     showToast(
       discovered.length > 0
-        ? text("TOAST_CELLS_REVEALED").replace("{count}", discovered.length)
-        : text("TOAST_ALREADY_REVEALED"),
+        ? tr("TOAST_CELLS_REVEALED").replace("{count}", discovered.length)
+        : tr("TOAST_ALREADY_REVEALED"),
     );
     return discovered.length;
   }
@@ -1699,7 +1699,7 @@
       const normalized = Core.normalizeMarkers(JSON.parse(saved));
       state.localMarkers = normalized.markers.map((marker) => ({ ...marker, local: true }));
     } catch (error) {
-      showToast(text("ERROR_READ_MARKERS").replace("{error}", error.message), true);
+      showToast(tr("ERROR_READ_MARKERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1725,7 +1725,7 @@
         }))
       }));
     } catch (error) {
-      showToast(text("ERROR_SAVE_MARKERS").replace("{error}", error.message), true);
+      showToast(tr("ERROR_SAVE_MARKERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1760,7 +1760,7 @@
         elements.fogToggle.checked = state.fogEnabled;
       }
     } catch (error) {
-      showToast(text("ERROR_READ_FILTERS").replace("{error}", error.message), true);
+      showToast(tr("ERROR_READ_FILTERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1780,7 +1780,7 @@
         fogEnabled: state.fogEnabled
       }));
     } catch (error) {
-      showToast(text("ERROR_SAVE_FILTERS").replace("{error}", error.message), true);
+      showToast(tr("ERROR_SAVE_FILTERS").replace("{error}", error.message), true);
     }
   }
 
@@ -1825,7 +1825,7 @@
     if (!results.length) {
       const empty = document.createElement("p");
       empty.className = "poi-search-empty";
-      empty.textContent = text("POI_SEARCH_EMPTY");
+      empty.textContent = tr("POI_SEARCH_EMPTY");
       resultsElement.appendChild(empty);
       return;
     }
@@ -1955,7 +1955,7 @@
       const title = document.createElement("strong");
       title.textContent = categoryLabel(definition);
       const detail = document.createElement("small");
-      detail.textContent = text("POI_ON_MAP").replace("{count}", counts[category] || 0);
+      detail.textContent = tr("POI_ON_MAP").replace("{count}", counts[category] || 0);
       text.append(title, detail);
 
       label.append(input, swatch, text);
@@ -1988,7 +1988,7 @@
       const percent = total ? Math.round((knownVisited / total) * 100) : 0;
       const markers = allMarkers();
       elements.visitedMetric.textContent = `${percent}%`;
-      elements.visitedDetail.textContent = text("SESSION_EXPLORED_OF")
+      elements.visitedDetail.textContent = tr("SESSION_EXPLORED_OF")
         .replace("{visited}", knownVisited)
         .replace("{total}", total);
       elements.markersMetric.textContent = String(markers.length);
@@ -2006,25 +2006,25 @@
     }
     elements.cellLabel.textContent = `${playerCell.x} : ${playerCell.y}`;
     elements.positionLabel.textContent = `X ${player.x.toFixed(1)} · Y ${player.y.toFixed(1)}`;
-    elements.worldChip.textContent = state.layout ? state.layout.worldId : text("STATUS_NO_WORLD");
+    elements.worldChip.textContent = state.layout ? state.layout.worldId : tr("STATUS_NO_WORLD");
     if (state.telemetryStatus === "invalid") {
-      elements.connectionLabel.textContent = text("STATUS_TELEMETRY_REJECTED");
+      elements.connectionLabel.textContent = tr("STATUS_TELEMETRY_REJECTED");
     } else if (state.telemetryStatus === "unsupported") {
-      elements.connectionLabel.textContent = text("STATUS_UNSUPPORTED_BUILD");
+      elements.connectionLabel.textContent = tr("STATUS_UNSUPPORTED_BUILD");
     } else if (state.telemetryStatus === "stale") {
-      elements.connectionLabel.textContent = text("STATUS_LAST_KNOWN");
+      elements.connectionLabel.textContent = tr("STATUS_LAST_KNOWN");
     } else if (state.telemetryStatus === "waiting") {
-      elements.connectionLabel.textContent = text("STATUS_AWAITING_TELEMETRY");
+      elements.connectionLabel.textContent = tr("STATUS_AWAITING_TELEMETRY");
     } else if (state.telemetryLive) {
       const playerCount = telemetryPlayersInCurrentWorld().length;
       elements.connectionLabel.textContent =
         state.telemetryPollFailures > 8 || state.telemetryStale
-          ? text("STATUS_STREAM_WAITING")
-          : text("STATUS_COORDS_ONLINE").replace("{count}", playerCount);
+          ? tr("STATUS_STREAM_WAITING")
+          : tr("STATUS_COORDS_ONLINE").replace("{count}", playerCount);
     } else {
       elements.connectionLabel.textContent = state.layout
-        ? text("STATUS_LOCAL_DATASET")
-        : text("STATUS_AWAITING_LAYOUT");
+        ? tr("STATUS_LOCAL_DATASET")
+        : tr("STATUS_AWAITING_LAYOUT");
     }
   }
 
@@ -2033,7 +2033,7 @@
     if (!markers.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = text("MARKERS_EMPTY");
+      empty.textContent = tr("MARKERS_EMPTY");
       elements.markerList.appendChild(empty);
       return;
     }
@@ -2055,7 +2055,7 @@
         `;
         button.querySelector("strong").textContent = marker.label;
         button.querySelector("small").textContent = `${marker.cellX} : ${marker.cellY}`;
-        button.querySelector("b").textContent = marker.local ? text("MARKER_MINE") : text("MARKER_IMPORTED");
+        button.querySelector("b").textContent = marker.local ? tr("MARKER_MINE") : tr("MARKER_IMPORTED");
         button.addEventListener("click", () => {
           if (!state.expanded) setExpanded(true);
           state.camera.x = marker.cellX + 0.5;
@@ -2094,10 +2094,10 @@
     state.markerMode = Boolean(enabled);
     elements.markerModeButton.setAttribute("aria-pressed", String(state.markerMode));
     elements.mapHint.textContent = state.markerMode
-      ? text("MAP_HINT_MARK_MODE")
+      ? tr("MAP_HINT_MARK_MODE")
       : state.expanded
-        ? text("MAP_HINT_PAN_ZOOM")
-        : text("MAP_HINT_DOUBLE_CLICK");
+        ? tr("MAP_HINT_PAN_ZOOM")
+        : tr("MAP_HINT_DOUBLE_CLICK");
     positionHoverHighlight();
   }
 
@@ -2108,18 +2108,18 @@
     );
     if (existingIndex >= 0) {
       state.localMarkers.splice(existingIndex, 1);
-      showToast(text("TOAST_MARKER_REMOVED").replace("{cell}", `${cellX}:${cellY}`));
+      showToast(tr("TOAST_MARKER_REMOVED").replace("{cell}", `${cellX}:${cellY}`));
     } else {
       state.localMarkers.push({
         id: `local-${Date.now()}-${cellX}-${cellY}`,
         cellX,
         cellY,
         kind: "x",
-        label: text("TOAST_CELL_VISITED").replace("{cell}", `${cellX}:${cellY}`),
+        label: tr("TOAST_CELL_VISITED").replace("{cell}", `${cellX}:${cellY}`),
         createdAt: new Date().toISOString(),
         local: true
       });
-      showToast(text("TOAST_MARKER_PLACED").replace("{cell}", `${cellX}:${cellY}`));
+      showToast(tr("TOAST_MARKER_PLACED").replace("{cell}", `${cellX}:${cellY}`));
     }
     saveLocalMarkers();
     invalidateStaticFrame();
@@ -2199,17 +2199,17 @@
         ? cell.poi
           ? cell.poi.label
           : terrainLabel(style)
-        : text("MAP_HOVER_UNEXPLORED");
+        : tr("MAP_HOVER_UNEXPLORED");
       elements.hoverDetails.textContent = visible
         ? [
             cell.poi
               ? categoryLabel(poiCategories[cell.poi.category] || poiCategories.landmark)
               : terrainLabel(style),
             cell.roads.length
-              ? `${text("MAP_HOVER_ROADS")}: ${cell.roads.length}`
-              : text("MAP_HOVER_NO_ROAD")
+              ? `${tr("MAP_HOVER_ROADS")}: ${cell.roads.length}`
+              : tr("MAP_HOVER_NO_ROAD")
           ].join(" · ")
-        : text("MAP_HOVER_FOGGED");
+        : tr("MAP_HOVER_FOGGED");
       positionHoverHighlight();
     }
 
@@ -2261,7 +2261,7 @@
       data.worldId &&
       data.worldId !== state.layout.worldId
     ) {
-      throw new TypeError(text("ERROR_WORLD_MISMATCH").replace("{kind}", kind));
+      throw new TypeError(tr("ERROR_WORLD_MISMATCH").replace("{kind}", kind));
     }
   }
 
@@ -2310,7 +2310,7 @@
           : []
     );
     elements.layoutFileStatus.textContent =
-      sourceName || text("DRAWER_CELLS").replace("{count}", layout.cells.length);
+      sourceName || tr("DRAWER_CELLS").replace("{count}", layout.cells.length);
     elements.layoutFileStatus.classList.add("is-loaded");
     centerOnPlayer();
     invalidateStaticFrame();
@@ -2343,7 +2343,7 @@
       state.telemetryStale = false;
       state.telemetryPollFailures = 0;
     }
-    elements.telemetryFileStatus.textContent = sourceName || text("STATUS_UPDATED");
+    elements.telemetryFileStatus.textContent = sourceName || tr("STATUS_UPDATED");
     elements.telemetryFileStatus.classList.add("is-loaded");
     updateSummary();
     scheduleRender();
@@ -2377,7 +2377,7 @@
         return;
       }
       const payload = JSON.parse(text);
-      applyTelemetry(payload, text("STATUS_AUTO_REFRESH"), { live: true });
+      applyTelemetry(payload, tr("STATUS_AUTO_REFRESH"), { live: true });
       state.telemetrySignature = text;
     } catch {
       state.telemetryPollFailures += 1;
@@ -2447,7 +2447,7 @@
       Array.from(nextVisited).some((key) => !state.visited.has(key));
     state.visited = nextVisited;
     elements.visitedFileStatus.textContent =
-      sourceName || text("DRAWER_CELLS").replace("{count}", visited.keys.size);
+      sourceName || tr("DRAWER_CELLS").replace("{count}", visited.keys.size);
     elements.visitedFileStatus.classList.add("is-loaded");
     if (changed) {
       invalidateStaticFrame();
@@ -2462,7 +2462,7 @@
     const markers = Core.normalizeMarkers(payload);
     ensureWorldMatch(markers, "Markers");
     state.importedMarkers = markers.markers.map((marker) => ({ ...marker, local: false }));
-    elements.markersFileStatus.textContent = sourceName || text("STATUS_MARKER_COUNT").replace("{count}", markers.markers.length);
+    elements.markersFileStatus.textContent = sourceName || tr("STATUS_MARKER_COUNT").replace("{count}", markers.markers.length);
     elements.markersFileStatus.classList.add("is-loaded");
     invalidateStaticFrame();
     updateSummary();
@@ -2514,7 +2514,7 @@
         cellX,
         cellY,
         kind: String(markerKind || "x"),
-        label: String(entry.label || text("MARKER_DEFAULT_NAME").replace("{cell}", `${cellX}:${cellY}`)),
+        label: String(entry.label || tr("MARKER_DEFAULT_NAME").replace("{cell}", `${cellX}:${cellY}`)),
         createdAt: entry.createdAt || null,
         local
       });
@@ -2538,7 +2538,7 @@
 
   function beginProfileHydration(sourceWorldId) {
     if (!state.layout || String(sourceWorldId || "") !== state.layout.worldId) {
-      throw new TypeError(text("ERROR_PROFILE_OTHER_WORLD"));
+      throw new TypeError(tr("ERROR_PROFILE_OTHER_WORLD"));
     }
     state.profileHydrationStatus = "pending";
     state.pendingVisited.clear();
@@ -2551,10 +2551,10 @@
 
   function hydrateProfileState(snapshot, options) {
     if (!state.layout) {
-      throw new TypeError(text("ERROR_PROFILE_NO_LAYOUT"));
+      throw new TypeError(tr("ERROR_PROFILE_NO_LAYOUT"));
     }
     if (!snapshot || typeof snapshot !== "object") {
-      throw new TypeError(text("ERROR_SNAPSHOT_NOT_OBJECT"));
+      throw new TypeError(tr("ERROR_SNAPSHOT_NOT_OBJECT"));
     }
     const profile = snapshot.profile && typeof snapshot.profile === "object"
       ? snapshot.profile
@@ -2564,11 +2564,11 @@
     const sourceWorldId = String(profile.sourceWorldId || snapshot.sourceWorldId || "").trim();
     if (!profileKey || !worldFingerprint || !sourceWorldId) {
       state.profileHydrationStatus = "error";
-      throw new TypeError(text("ERROR_SNAPSHOT_INCOMPLETE"));
+      throw new TypeError(tr("ERROR_SNAPSHOT_INCOMPLETE"));
     }
     if (sourceWorldId !== state.layout.worldId) {
       state.profileHydrationStatus = "error";
-      throw new TypeError(text("ERROR_SNAPSHOT_OTHER_WORLD"));
+      throw new TypeError(tr("ERROR_SNAPSHOT_OTHER_WORLD"));
     }
 
     const hydrationOptions = options && typeof options === "object" ? options : {};
@@ -2646,14 +2646,14 @@
 
   function applyBundle(bundle, sourceName) {
     if (!bundle || typeof bundle !== "object") {
-      throw new TypeError(text("ERROR_BUNDLE_NOT_OBJECT"));
+      throw new TypeError(tr("ERROR_BUNDLE_NOT_OBJECT"));
     }
     if (bundle.layout) applyLayout(bundle.layout, sourceName);
     if (bundle.telemetry) applyTelemetry(bundle.telemetry, sourceName);
     if (bundle.visited) applyVisited(bundle.visited, sourceName, true);
     if (bundle.markers) applyMarkers(bundle.markers, sourceName);
     if (!bundle.layout && !bundle.telemetry && !bundle.visited && !bundle.markers) {
-      throw new TypeError(text("ERROR_BUNDLE_EMPTY"));
+      throw new TypeError(tr("ERROR_BUNDLE_EMPTY"));
     }
   }
 
@@ -2662,7 +2662,7 @@
     try {
       return JSON.parse(text);
     } catch (error) {
-      throw new SyntaxError(text("ERROR_BAD_JSON").replace("{file}", file.name).replace("{error}", error.message));
+      throw new SyntaxError(tr("ERROR_BAD_JSON").replace("{file}", file.name).replace("{error}", error.message));
     }
   }
 
@@ -2677,14 +2677,14 @@
         else if (kind === "telemetry") applyTelemetry(payload, file.name);
         else if (kind === "visited") applyVisited(payload, file.name, true);
         else if (kind === "markers") applyMarkers(payload, file.name);
-        else throw new TypeError(text("ERROR_UNKNOWN_KIND").replace("{file}", file.name));
+        else throw new TypeError(tr("ERROR_UNKNOWN_KIND").replace("{file}", file.name));
         loaded += 1;
       } catch (error) {
         showToast(error.message, true);
       }
     }
     if (loaded) {
-      showToast(text("TOAST_FILES_LOADED").replace("{count}", loaded));
+      showToast(tr("TOAST_FILES_LOADED").replace("{count}", loaded));
     }
   }
 
@@ -2779,7 +2779,7 @@
             cellX: -3,
             cellY: 2,
             kind: "x",
-            label: text("DEMO_MARKER_LOOT"),
+            label: tr("DEMO_MARKER_LOOT"),
             createdAt: "2026-07-26T18:20:00Z"
           }
         ]
@@ -2789,9 +2789,9 @@
 
   function loadDemo() {
     state.visited.clear();
-    applyBundle(buildDemoBundle(), text("SOURCE_BUILT_IN_DEMO"));
-    elements.connectionLabel.textContent = text("HEADER_CONNECTION_DEMO");
-    showToast(text("TOAST_DEMO_LOADED"));
+    applyBundle(buildDemoBundle(), tr("SOURCE_BUILT_IN_DEMO"));
+    elements.connectionLabel.textContent = tr("HEADER_CONNECTION_DEMO");
+    showToast(tr("TOAST_DEMO_LOADED"));
   }
 
   elements.expandButton.addEventListener("click", () => setExpanded(!state.expanded));
@@ -2882,7 +2882,7 @@
 
   elements.schematicOnlyButton.addEventListener("click", () => {
     setPoiCategories(["schematic"]);
-    showToast(text("TOAST_SCHEMATICS_ONLY"));
+    showToast(tr("TOAST_SCHEMATICS_ONLY"));
   });
 
   elements.hideAllPoiButton.addEventListener("click", () => {
@@ -2912,7 +2912,7 @@
 
   elements.clearMarkersButton.addEventListener("click", () => {
     if (!state.localMarkers.length) {
-      showToast(text("TOAST_NO_MARKERS"));
+      showToast(tr("TOAST_NO_MARKERS"));
       return;
     }
     state.localMarkers = [];
@@ -2920,7 +2920,7 @@
     invalidateStaticFrame();
     updateSummary();
     scheduleRender();
-    showToast(text("TOAST_MARKERS_CLEARED"));
+    showToast(tr("TOAST_MARKERS_CLEARED"));
   });
 
   elements.layoutInput.addEventListener("change", (event) => loadFiles(event.target.files, "layout"));
@@ -3063,7 +3063,7 @@
       applyLayout(layout, "SMMinimap API");
     },
     updateTelemetry(telemetry, options) {
-      applyTelemetry(telemetry, text("SOURCE_EMBEDDED_CHANNEL"), options);
+      applyTelemetry(telemetry, tr("SOURCE_EMBEDDED_CHANNEL"), options);
     },
     updateVisited(visited, options) {
       applyVisited(visited, "SMMinimap API", !options || options.merge !== false);
@@ -3170,9 +3170,9 @@
   const bootstrapBundle = window.SMMinimapBootstrapData;
   if (bootstrapBundle && typeof bootstrapBundle === "object" && bootstrapBundle.layout) {
     state.visited.clear();
-    applyBundle(bootstrapBundle, text("SOURCE_LOCAL_BUNDLE"));
-    elements.connectionLabel.textContent = text("SOURCE_LOCAL_WORLD");
-    showToast(text("TOAST_LOCAL_WORLD"));
+    applyBundle(bootstrapBundle, tr("SOURCE_LOCAL_BUNDLE"));
+    elements.connectionLabel.textContent = tr("SOURCE_LOCAL_WORLD");
+    showToast(tr("TOAST_LOCAL_WORLD"));
   } else {
     loadDemo();
   }
