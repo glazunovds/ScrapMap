@@ -16,24 +16,28 @@
   const categoryLabel = (definition) =>
     definition?.labelKey ? text(definition.labelKey, definition.label) : definition?.label || "";
 
+  /** A terrain name in the active language. Same shape as categoryLabel. */
+  const terrainLabel = (style) =>
+    style?.labelKey ? text(style.labelKey, style.label) : style?.label || "";
+
   const Core = window.SMMapCore;
   if (!Core) {
     throw new Error("map-core.js не загружен.");
   }
 
   const terrainPalette = {
-    meadow: { base: "#60764a", detail: "#87975b", edge: "#3f5136", label: "Луга" },
-    forest: { base: "#314b3a", detail: "#526d49", edge: "#23382c", label: "Лес" },
-    desert: { base: "#765a39", detail: "#a07a45", edge: "#513e2c", label: "Выжженная земля" },
-    water: { base: "#365c68", detail: "#4f8290", edge: "#294751", label: "Вода" },
-    lake: { base: "#365c68", detail: "#4f8290", edge: "#294751", label: "Вода" },
-    chemical: { base: "#5f7040", detail: "#8ca34e", edge: "#3f4d2b", label: "Химическая зона" },
-    industrial: { base: "#465156", detail: "#687277", edge: "#30393c", label: "Промзона" },
-    field: { base: "#7a7442", detail: "#a49a53", edge: "#554f31", label: "Поля" },
-    autumn: { base: "#6c4b36", detail: "#986444", edge: "#493227", label: "Осенний лес" },
-    burnt: { base: "#3f3a33", detail: "#665445", edge: "#2b2824", label: "Сгоревший лес" },
-    rock: { base: "#55575a", detail: "#74777b", edge: "#383a3d", label: "Скалы" },
-    unknown: { base: "#42484a", detail: "#5c6365", edge: "#303536", label: "Неизвестно" }
+    meadow: { base: "#60764a", detail: "#87975b", edge: "#3f5136", labelKey: "TERRAIN_MEADOW", label: "Meadow" },
+    forest: { base: "#314b3a", detail: "#526d49", edge: "#23382c", labelKey: "TERRAIN_FOREST", label: "Forest" },
+    desert: { base: "#765a39", detail: "#a07a45", edge: "#513e2c", labelKey: "TERRAIN_SCORCHED", label: "Scorched earth" },
+    water: { base: "#365c68", detail: "#4f8290", edge: "#294751", labelKey: "TERRAIN_WATER", label: "Water" },
+    lake: { base: "#365c68", detail: "#4f8290", edge: "#294751", labelKey: "TERRAIN_WATER", label: "Water" },
+    chemical: { base: "#5f7040", detail: "#8ca34e", edge: "#3f4d2b", labelKey: "TERRAIN_CHEMICAL", label: "Chemical zone" },
+    industrial: { base: "#465156", detail: "#687277", edge: "#30393c", labelKey: "TERRAIN_INDUSTRIAL", label: "Industrial zone" },
+    field: { base: "#7a7442", detail: "#a49a53", edge: "#554f31", labelKey: "TERRAIN_FIELD", label: "Fields" },
+    autumn: { base: "#6c4b36", detail: "#986444", edge: "#493227", labelKey: "TERRAIN_AUTUMN", label: "Autumn forest" },
+    burnt: { base: "#3f3a33", detail: "#665445", edge: "#2b2824", labelKey: "TERRAIN_BURNT", label: "Burnt forest" },
+    rock: { base: "#55575a", detail: "#74777b", edge: "#383a3d", labelKey: "TERRAIN_ROCK", label: "Rock" },
+    unknown: { base: "#42484a", detail: "#5c6365", edge: "#303536", labelKey: "TERRAIN_UNKNOWN", label: "Unknown" }
   };
 
   /**
@@ -1225,10 +1229,10 @@
     context.fillStyle = "#dce1dc";
     context.textAlign = "center";
     context.font = "600 16px Segoe UI, sans-serif";
-    context.fillText("Нет данных layout", state.canvasWidth / 2, state.canvasHeight / 2 - 8);
+    context.fillText(text("STATUS_NO_LAYOUT"), state.canvasWidth / 2, state.canvasHeight / 2 - 8);
     context.fillStyle = "#7f8988";
     context.font = "11px Segoe UI, sans-serif";
-    context.fillText("Откройте «Данные» и выберите JSON", state.canvasWidth / 2, state.canvasHeight / 2 + 17);
+    context.fillText(text("STATUS_OPEN_DATA"), state.canvasWidth / 2, state.canvasHeight / 2 + 17);
     context.restore();
   }
 
@@ -1652,7 +1656,7 @@
    */
   function revealAllCells() {
     if (!state.layout) {
-      showToast("Карта ещё не загружена.", true);
+      showToast(text("TOAST_MAP_NOT_LOADED"), true);
       return 0;
     }
     const discovered = [];
@@ -1675,7 +1679,7 @@
     showToast(
       discovered.length > 0
         ? `Открыто клеток: ${discovered.length}`
-        : "Вся карта уже открыта.",
+        : text("TOAST_ALREADY_REVEALED"),
     );
     return discovered.length;
   }
@@ -1947,7 +1951,7 @@
       const title = document.createElement("strong");
       title.textContent = categoryLabel(definition);
       const detail = document.createElement("small");
-      detail.textContent = `${counts[category] || 0} на карте`;
+      detail.textContent = text("POI_ON_MAP").replace("{count}", counts[category] || 0);
       text.append(title, detail);
 
       label.append(input, swatch, text);
@@ -1998,11 +2002,11 @@
     }
     elements.cellLabel.textContent = `${playerCell.x} : ${playerCell.y}`;
     elements.positionLabel.textContent = `X ${player.x.toFixed(1)} · Y ${player.y.toFixed(1)}`;
-    elements.worldChip.textContent = state.layout ? state.layout.worldId : "нет мира";
+    elements.worldChip.textContent = state.layout ? state.layout.worldId : text("STATUS_NO_WORLD");
     if (state.telemetryStatus === "invalid") {
-      elements.connectionLabel.textContent = "телеметрия отклонена";
+      elements.connectionLabel.textContent = text("STATUS_TELEMETRY_REJECTED");
     } else if (state.telemetryStatus === "unsupported") {
-      elements.connectionLabel.textContent = "версия игры не поддерживается";
+      elements.connectionLabel.textContent = text("STATUS_UNSUPPORTED_BUILD");
     } else if (state.telemetryStatus === "stale") {
       elements.connectionLabel.textContent = "последняя известная позиция";
     } else if (state.telemetryStatus === "waiting") {
@@ -2190,13 +2194,13 @@
       elements.hoverTitle.textContent = visible
         ? cell.poi
           ? cell.poi.label
-          : style.label
+          : terrainLabel(style)
         : text("MAP_HOVER_UNEXPLORED");
       elements.hoverDetails.textContent = visible
         ? [
             cell.poi
               ? categoryLabel(poiCategories[cell.poi.category] || poiCategories.landmark)
-              : style.label,
+              : terrainLabel(style),
             cell.roads.length
               ? `${text("MAP_HOVER_ROADS")}: ${cell.roads.length}`
               : text("MAP_HOVER_NO_ROAD")

@@ -589,18 +589,23 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
     // once, and the tray is the one surface that exists before the map does.
     let language = Submenu::with_id(app, "language", text("LANGUAGE_TITLE"), true)
         .map_err(|error| error.to_string())?;
+    let chosen = current_language();
+    // Kept so the tick can be moved. A CheckMenuItem toggles itself when
+    // clicked and knows nothing about the others, so without this every
+    // language you ever picked stays ticked.
+    let mut language_items = Vec::new();
     for (code, label) in LANGUAGES {
-        let selected = code == current_language();
         let item = CheckMenuItem::with_id(
             app,
             format!("language:{code}"),
             label,
             true,
-            selected,
+            code == chosen,
             None::<&str>,
         )
         .map_err(|error| error.to_string())?;
         language.append(&item).map_err(|error| error.to_string())?;
+        language_items.push((code, item));
     }
 
     let menu = Menu::with_items(
@@ -627,7 +632,7 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
         tray = tray.icon(icon);
     }
 
-    tray.on_menu_event(|app, event| {
+    tray.on_menu_event(move |app, event| {
         let state = app.state::<OverlayState>();
         let outcome = match event.id().as_ref() {
             "toggle" => {
@@ -655,6 +660,9 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
             // there was a WebView to ask.
             id if id.starts_with("language:") => {
                 let code = id.trim_start_matches("language:").to_owned();
+                for (candidate, item) in &language_items {
+                    let _ = item.set_checked(*candidate == code);
+                }
                 set_interface_language(code.clone()).and_then(|()| {
                     main_window(app).and_then(|window| {
                         window

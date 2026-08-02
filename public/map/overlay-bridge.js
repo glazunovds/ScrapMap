@@ -389,7 +389,7 @@
     if (profileElements.copy) {
       profileElements.copy.textContent = manualAllowed
         ? text("PROFILE_DIALOG_COPY")
-        : "Этот профиль распознан автоматически; ручной выбор не требуется.";
+        : text("PROFILE_AUTOMATIC");
     }
     renderProfileCandidates(profileUiSnapshot);
   }
