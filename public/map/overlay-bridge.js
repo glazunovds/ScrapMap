@@ -5,12 +5,6 @@
    *  degrades to something identifiable rather than to blank UI. */
   const text = (key) => window.SMText?.t(key) ?? key;
 
-  // The tray owns the language setting, because it is the one surface that
-  // exists before the map does. Applied here without a reload.
-  listen?.("scrapmap:language", (event) => {
-    const language = String(event?.payload || "");
-    if (language) window.SMText?.setLanguage(language);
-  });
 
   const tauri = window.__TAURI__;
   const invoke = tauri?.core?.invoke;
@@ -1583,6 +1577,13 @@
     ) {
       enqueueStorage(() => flushProfileJob(job));
     }
+  });
+
+  // The tray owns the language setting, because it is the one surface that
+  // exists before the map does. Applied here without a reload.
+  listen?.("scrapmap:language", (event) => {
+    const language = String(event?.payload || "");
+    if (language) window.SMText?.setLanguage(language);
   });
 
   listen("scrapmap:overlay-mode", (event) => {
