@@ -524,14 +524,23 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
 /// Compiled in, because the tray is built before a WebView exists to ask. The
 /// language is read from where the panel stores it, so the two agree after a
 /// restart; the menu cannot rebuild itself mid-session.
+/// The languages the tray offers, mirroring `LANGUAGES` in `i18n.js`.
+const LANGUAGES: [(&str, &str); 2] = [("en", "English"), ("ru", "Русский")];
+
+/// The interface language, defaulting to English.
+fn current_language() -> String {
+    atlas_bake::atlas_root()
+        .and_then(|root| fs::read_to_string(root.join("language.txt")).ok())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| LANGUAGES.iter().any(|(code, _)| code == value))
+        .unwrap_or_else(|| "en".to_owned())
+}
+
 fn tray_text() -> impl Fn(&str) -> String {
     const EN: &str = include_str!("../../public/map/locales/en.json");
     const RU: &str = include_str!("../../public/map/locales/ru.json");
 
-    let language = atlas_bake::atlas_root()
-        .and_then(|root| fs::read_to_string(root.join("language.txt")).ok())
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_else(|| "en".to_owned());
+    let language = current_language();
 
     let english: serde_json::Value = serde_json::from_str(EN).unwrap_or(serde_json::Value::Null);
     let chosen: serde_json::Value = match language.as_str() {
@@ -558,13 +567,13 @@ fn tray_text() -> impl Fn(&str) -> String {
 /// a checkout of this repository.
 fn install_tray(app: &AppHandle) -> Result<(), String> {
     use tauri::{
-        menu::{Menu, MenuItem, PredefinedMenuItem},
+        menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
         tray::TrayIconBuilder,
     };
 
     let text = tray_text();
 
-    let show = MenuItem::with_id(app, "toggle", "Показать / скрыть карту", true, None::<&str>)
+    let show = MenuItem::with_id(app, "toggle", text("TRAY_TOGGLE"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
     let expand = MenuItem::with_id(app, "expand", text("TRAY_EXPAND"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
@@ -576,9 +585,37 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let separator = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
 
+    // Language lives here rather than in the panel: it is a setting you reach
+    // once, and the tray is the one surface that exists before the map does.
+    let language = Submenu::with_id(app, "language", text("LANGUAGE_TITLE"), true)
+        .map_err(|error| error.to_string())?;
+    for (code, label) in LANGUAGES {
+        let selected = code == current_language();
+        let item = CheckMenuItem::with_id(
+            app,
+            format!("language:{code}"),
+            label,
+            true,
+            selected,
+            None::<&str>,
+        )
+        .map_err(|error| error.to_string())?;
+        language.append(&item).map_err(|error| error.to_string())?;
+    }
+
     let menu = Menu::with_items(
         app,
-        &[&show, &expand, &separator, &apply, &revert, &separator, &quit],
+        &[
+            &show,
+            &expand,
+            &separator,
+            &apply,
+            &revert,
+            &separator,
+            &language,
+            &separator,
+            &quit,
+        ],
     )
     .map_err(|error| error.to_string())?;
 
@@ -612,6 +649,19 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
             "quit" => {
                 app.exit(0);
                 Ok(())
+            }
+            // Applied to the running map at once; the menu itself is rebuilt on
+            // the next start, which is the honest limit of a menu built before
+            // there was a WebView to ask.
+            id if id.starts_with("language:") => {
+                let code = id.trim_start_matches("language:").to_owned();
+                set_interface_language(code.clone()).and_then(|()| {
+                    main_window(app).and_then(|window| {
+                        window
+                            .emit("scrapmap:language", code)
+                            .map_err(|error| error.to_string())
+                    })
+                })
             }
             _ => Ok(()),
         };

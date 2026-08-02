@@ -1,12 +1,10 @@
 {
   "APP_TITLE": "Scrap Mechanic — локальная карта",
-
   "HEADER_DEMO": "Демо",
   "HEADER_DATA": "Данные",
   "HEADER_EXPAND": "Развернуть карту",
   "HEADER_COLLAPSE": "Свернуть",
   "HEADER_CONNECTION_DEMO": "демонстрационные данные",
-
   "MAP_REGION_LABEL": "Карта мира",
   "MAP_CANVAS_LABEL": "Схематическая карта мира Scrap Mechanic. Двойной щелчок ставит или убирает локальную метку.",
   "MAP_CURRENT_CELL": "ТЕКУЩАЯ ЯЧЕЙКА",
@@ -19,7 +17,6 @@
   "MAP_HOVER_UNKNOWN": "Неизвестная клетка",
   "MAP_HOVER_NO_DATA": "Нет данных",
   "MAP_HINT_DOUBLE_CLICK": "Двойной щелчок — поставить ×",
-
   "SESSION_EYEBROW": "СЕАНС",
   "SESSION_TITLE": "Обзор мира",
   "SESSION_RESOLVING": "ОПРЕДЕЛЯЕМ…",
@@ -34,7 +31,6 @@
   "SESSION_REVEAL_ALL_NOTE": "Отмечает все клетки посещёнными, туман остаётся включён",
   "SESSION_PHOTOGRAPH_POI": "Отснять точки интереса",
   "SESSION_PHOTOGRAPH_POI_NOTE": "Камера облетит POI и сфотографирует их сверху. Съёмка начнётся при следующей загрузке мира.",
-
   "MINIMAP_EYEBROW": "МИНИ-КАРТА",
   "MINIMAP_TITLE": "Размер и угол",
   "MINIMAP_COPY": "Игра держит трекер заданий справа, поэтому мини-карту бывает удобнее сдвинуть.",
@@ -48,7 +44,6 @@
   "MINIMAP_SIZE_MEDIUM": "Средняя",
   "MINIMAP_SIZE_NORMAL": "Обычная",
   "MINIMAP_SIZE_LARGE": "Крупная",
-
   "POI_EYEBROW": "ТОЧКИ ИНТЕРЕСА",
   "POI_TITLE": "Что показывать",
   "POI_COPY": "Цветные точки видны при любом масштабе. Настройка запоминается отдельно для каждого мира.",
@@ -59,14 +54,12 @@
   "POI_SHOW_ALL": "Все",
   "POI_HIDE_ALL": "Скрыть",
   "POI_FILTER_LIST_LABEL": "Фильтры точек интереса",
-
   "MARKERS_EYEBROW": "ЛОКАЛЬНЫЕ ДАННЫЕ",
   "MARKERS_TITLE": "Метки с крестиком",
   "MARKERS_EXPORT": "Экспорт",
   "MARKERS_COPY": "Включите «Метка» и нажмите на клетку. Повторное нажатие убирает крестик.",
   "MARKERS_EMPTY": "Меток пока нет",
   "MARKERS_CLEAR": "Удалить мои метки этого мира",
-
   "LEGEND_EYEBROW": "УСЛОВНЫЕ ОБОЗНАЧЕНИЯ",
   "LEGEND_MEADOW": "Луга",
   "LEGEND_FOREST": "Лес",
@@ -78,7 +71,6 @@
   "LEGEND_WATER": "Вода",
   "LEGEND_ROAD": "Дорога",
   "LEGEND_POI": "Точка интереса",
-
   "DRAWER_EYEBROW": "ИМПОРТ JSON",
   "DRAWER_TITLE": "Источники карты",
   "DRAWER_CLOSE": "Закрыть",
@@ -93,7 +85,6 @@
   "DRAWER_FILE_NONE": "не выбран",
   "DRAWER_LOADER_TITLE": "Для будущего лоадера",
   "DRAWER_LOADER_COPY": "Страница также принимает window.postMessage и вызовы window.SMMinimap без перезагрузки.",
-
   "PROFILE_EYEBROW": "ПРОФИЛЬ КАРТЫ",
   "PROFILE_DIALOG_TITLE": "Какой это сервер?",
   "PROFILE_DIALOG_CLOSE": "Закрыть выбор профиля",
@@ -101,7 +92,6 @@
   "PROFILE_NEW_LABEL": "Новый профиль",
   "PROFILE_NEW_PLACEHOLDER": "Например, сервер друга",
   "PROFILE_CREATE": "Создать",
-
   "BADGE_RESOLVING": "ОПРЕДЕЛЯЕМ…",
   "BADGE_SWITCHING": "ПЕРЕКЛЮЧАЕМ…",
   "BADGE_ERROR": "ОШИБКА",
@@ -114,14 +104,24 @@
   "SUMMARY_LOCAL": "Локальный мир",
   "SUMMARY_MANUAL": "Именованный сервер",
   "SUMMARY_SERVER": "Сервер распознан автоматически",
-
   "LANGUAGE_EYEBROW": "ЯЗЫК",
   "LANGUAGE_TITLE": "Язык интерфейса",
   "LANGUAGE_COPY": "Применяется сразу и запоминается на этом компьютере.",
-
   "TRAY_TOGGLE": "Показать / скрыть карту",
   "TRAY_EXPAND": "Полная карта",
   "TRAY_APPLY_PATCH": "Установить патч игры",
   "TRAY_REVERT_PATCH": "Вернуть файлы игры",
-  "TRAY_QUIT": "Выход"
+  "TRAY_QUIT": "Выход",
+  "MAP_HOVER_UNEXPLORED": "Неисследованная клетка",
+  "MAP_HOVER_FOGGED": "Данные скрыты туманом войны",
+  "MAP_HOVER_ROADS": "дорог",
+  "MAP_HOVER_NO_ROAD": "без дороги",
+  "POI_CAT_SCHEMATIC": "Схемоботы / рецепты",
+  "POI_CAT_QUEST": "Квестовые места",
+  "POI_CAT_CAMP": "Кемпинг-споты",
+  "POI_CAT_WAREHOUSE": "Склады",
+  "POI_CAT_STATION": "Станции и торговец",
+  "POI_CAT_DUNGEON": "Подземелья",
+  "POI_CAT_LANDMARK": "Прочие ориентиры",
+  "POI_CAT_FILLER": "Случайная генерация"
 }

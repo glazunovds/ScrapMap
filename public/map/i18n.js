@@ -90,28 +90,9 @@
       /* not worth failing a language change over */
     }
     applyTo(document);
-    wirePicker();
     document.documentElement.lang = active;
     window.dispatchEvent(new CustomEvent("sm-minimap:language", { detail: { language: active } }));
     return active;
-  }
-
-  /** Fills the picker and keeps it in step with whatever language is active. */
-  function wirePicker() {
-    const select = document.getElementById("languageSelect");
-    if (!select) return;
-    if (!select.options.length) {
-      LANGUAGES.forEach((entry) => {
-        const option = document.createElement("option");
-        option.value = entry.code;
-        // Each language names itself, so it is readable to the person who
-        // wants it whatever the interface currently says.
-        option.textContent = entry.label;
-        select.appendChild(option);
-      });
-      select.addEventListener("change", (event) => setLanguage(event.target.value));
-    }
-    select.value = active;
   }
 
   window.SMText = {
@@ -126,9 +107,8 @@
   // language. app.js reads strings through SMText.t, which falls back to the
   // markup until the dictionary lands.
   setLanguage(preferred());
-  // The picker lives in markup that may not have parsed yet on first run.
+  // The markup may not have parsed yet on first run.
   window.addEventListener("DOMContentLoaded", () => {
     applyTo(document);
-    wirePicker();
   });
 })();

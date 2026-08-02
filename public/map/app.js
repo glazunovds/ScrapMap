@@ -107,49 +107,57 @@
 
   const poiCategories = Object.freeze({
     schematic: {
-      label: "Схемоботы / рецепты",
+      labelKey: "POI_CAT_SCHEMATIC",
+      label: "Schematics / recipes",
       shortLabel: "СХЕМЫ",
       color: "#5ce6f2",
       fill: "#15383d"
     },
     quest: {
-      label: "Квестовые места",
+      labelKey: "POI_CAT_QUEST",
+      label: "Quest locations",
       shortLabel: "КВЕСТ",
       color: "#c995ff",
       fill: "#30203e"
     },
     camp: {
-      label: "Кемпинг-споты",
+      labelKey: "POI_CAT_CAMP",
+      label: "Camp spots",
       shortLabel: "ЛАГЕРЬ",
       color: "#f0a35d",
       fill: "#3b2819"
     },
     warehouse: {
-      label: "Склады",
+      labelKey: "POI_CAT_WAREHOUSE",
+      label: "Warehouses",
       shortLabel: "СКЛАД",
       color: "#f07669",
       fill: "#3d211f"
     },
     service: {
-      label: "Станции и торговец",
+      labelKey: "POI_CAT_STATION",
+      label: "Stations and trader",
       shortLabel: "СЕРВИС",
       color: "#ffd45b",
       fill: "#3e3519"
     },
     dungeon: {
-      label: "Подземелья",
+      labelKey: "POI_CAT_DUNGEON",
+      label: "Dungeons",
       shortLabel: "ДАНЖ",
       color: "#6daaff",
       fill: "#1c2e45"
     },
     landmark: {
-      label: "Прочие ориентиры",
+      labelKey: "POI_CAT_LANDMARK",
+      label: "Other landmarks",
       shortLabel: "ПРОЧЕЕ",
       color: "#84d38c",
       fill: "#203724"
     },
     filler: {
-      label: "Случайная генерация",
+      labelKey: "POI_CAT_FILLER",
+      label: "Generator filler",
       shortLabel: "ФОН",
       color: "#8d9a94",
       fill: "#242a28"
@@ -1902,7 +1910,7 @@
       const input = document.createElement("input");
       input.type = "checkbox";
       input.checked = state.poiEnabled.has(category);
-      input.setAttribute("aria-label", definition.label);
+      input.setAttribute("aria-label", categoryLabel(definition));
       input.addEventListener("change", () => {
         if (input.checked) state.poiEnabled.add(category);
         else state.poiEnabled.delete(category);
@@ -1922,7 +1930,7 @@
 
       const text = document.createElement("span");
       const title = document.createElement("strong");
-      title.textContent = definition.label;
+      title.textContent = categoryLabel(definition);
       const detail = document.createElement("small");
       detail.textContent = `${counts[category] || 0} на карте`;
       text.append(title, detail);
@@ -2000,7 +2008,7 @@
     if (!markers.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "Меток пока нет";
+      empty.textContent = text("MARKERS_EMPTY");
       elements.markerList.appendChild(empty);
       return;
     }
@@ -2166,15 +2174,17 @@
         ? cell.poi
           ? cell.poi.label
           : style.label
-        : "Неисследованная клетка";
+        : text("MAP_HOVER_UNEXPLORED");
       elements.hoverDetails.textContent = visible
         ? [
             cell.poi
-              ? (poiCategories[cell.poi.category] || poiCategories.landmark).label
+              ? categoryLabel(poiCategories[cell.poi.category] || poiCategories.landmark)
               : style.label,
-            cell.roads.length ? `дорог: ${cell.roads.length}` : "без дороги"
+            cell.roads.length
+              ? `${text("MAP_HOVER_ROADS")}: ${cell.roads.length}`
+              : text("MAP_HOVER_NO_ROAD")
           ].join(" · ")
-        : "Данные скрыты туманом войны";
+        : text("MAP_HOVER_FOGGED");
       positionHoverHighlight();
     }
 

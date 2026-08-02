@@ -5,13 +5,11 @@
    *  degrades to something identifiable rather than to blank UI. */
   const text = (key) => window.SMText?.t(key) ?? key;
 
-  // The tray menu is built before a WebView exists to ask, so the choice is
-  // left where the native side can read it on the next start.
-  window.addEventListener("sm-minimap:language", (event) => {
-    const language = String(event?.detail?.language || "");
-    if (language && invoke) {
-      invoke("set_interface_language", { language }).catch(() => {});
-    }
+  // The tray owns the language setting, because it is the one surface that
+  // exists before the map does. Applied here without a reload.
+  listen?.("scrapmap:language", (event) => {
+    const language = String(event?.payload || "");
+    if (language) window.SMText?.setLanguage(language);
   });
 
   const tauri = window.__TAURI__;

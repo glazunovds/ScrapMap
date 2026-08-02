@@ -1,12 +1,10 @@
 {
   "APP_TITLE": "Scrap Mechanic — local map",
-
   "HEADER_DEMO": "Demo",
   "HEADER_DATA": "Data",
   "HEADER_EXPAND": "Expand map",
   "HEADER_COLLAPSE": "Collapse",
   "HEADER_CONNECTION_DEMO": "demonstration data",
-
   "MAP_REGION_LABEL": "World map",
   "MAP_CANVAS_LABEL": "Schematic map of the Scrap Mechanic world. Double-click to place or remove a local marker.",
   "MAP_CURRENT_CELL": "CURRENT CELL",
@@ -19,7 +17,6 @@
   "MAP_HOVER_UNKNOWN": "Unknown cell",
   "MAP_HOVER_NO_DATA": "No data",
   "MAP_HINT_DOUBLE_CLICK": "Double-click to place ×",
-
   "SESSION_EYEBROW": "SESSION",
   "SESSION_TITLE": "World overview",
   "SESSION_RESOLVING": "RESOLVING…",
@@ -34,7 +31,6 @@
   "SESSION_REVEAL_ALL_NOTE": "Marks every cell visited. Fog stays switched on.",
   "SESSION_PHOTOGRAPH_POI": "Photograph points of interest",
   "SESSION_PHOTOGRAPH_POI_NOTE": "The camera flies over each point of interest and photographs it from above. The sweep starts on the next world load.",
-
   "MINIMAP_EYEBROW": "MINIMAP",
   "MINIMAP_TITLE": "Size and corner",
   "MINIMAP_COPY": "The game keeps its quest tracker on the right, so the minimap is often better moved.",
@@ -48,7 +44,6 @@
   "MINIMAP_SIZE_MEDIUM": "Medium",
   "MINIMAP_SIZE_NORMAL": "Normal",
   "MINIMAP_SIZE_LARGE": "Large",
-
   "POI_EYEBROW": "POINTS OF INTEREST",
   "POI_TITLE": "What to show",
   "POI_COPY": "Coloured dots stay visible at any zoom. The setting is remembered per world.",
@@ -59,14 +54,12 @@
   "POI_SHOW_ALL": "All",
   "POI_HIDE_ALL": "Hide",
   "POI_FILTER_LIST_LABEL": "Point of interest filters",
-
   "MARKERS_EYEBROW": "LOCAL DATA",
   "MARKERS_TITLE": "Cross markers",
   "MARKERS_EXPORT": "Export",
   "MARKERS_COPY": "Turn on \"Mark\" and click a cell. Clicking again removes the cross.",
   "MARKERS_EMPTY": "No markers yet",
   "MARKERS_CLEAR": "Delete my markers in this world",
-
   "LEGEND_EYEBROW": "LEGEND",
   "LEGEND_MEADOW": "Meadow",
   "LEGEND_FOREST": "Forest",
@@ -78,7 +71,6 @@
   "LEGEND_WATER": "Water",
   "LEGEND_ROAD": "Road",
   "LEGEND_POI": "Point of interest",
-
   "DRAWER_EYEBROW": "IMPORT JSON",
   "DRAWER_TITLE": "Map sources",
   "DRAWER_CLOSE": "Close",
@@ -93,7 +85,6 @@
   "DRAWER_FILE_NONE": "not chosen",
   "DRAWER_LOADER_TITLE": "For a future loader",
   "DRAWER_LOADER_COPY": "The page also accepts window.postMessage and window.SMMinimap calls without reloading.",
-
   "PROFILE_EYEBROW": "MAP PROFILE",
   "PROFILE_DIALOG_TITLE": "Which server is this?",
   "PROFILE_DIALOG_CLOSE": "Close profile chooser",
@@ -101,7 +92,6 @@
   "PROFILE_NEW_LABEL": "New profile",
   "PROFILE_NEW_PLACEHOLDER": "For example, a friend's server",
   "PROFILE_CREATE": "Create",
-
   "BADGE_RESOLVING": "RESOLVING…",
   "BADGE_SWITCHING": "SWITCHING…",
   "BADGE_ERROR": "ERROR",
@@ -114,14 +104,24 @@
   "SUMMARY_LOCAL": "Local world",
   "SUMMARY_MANUAL": "Named server",
   "SUMMARY_SERVER": "Server identified automatically",
-
   "LANGUAGE_EYEBROW": "LANGUAGE",
   "LANGUAGE_TITLE": "Interface language",
   "LANGUAGE_COPY": "Applies immediately and is remembered on this machine.",
-
   "TRAY_TOGGLE": "Show / hide map",
   "TRAY_EXPAND": "Full map",
   "TRAY_APPLY_PATCH": "Install game patch",
   "TRAY_REVERT_PATCH": "Restore game files",
-  "TRAY_QUIT": "Quit"
+  "TRAY_QUIT": "Quit",
+  "MAP_HOVER_UNEXPLORED": "Unexplored cell",
+  "MAP_HOVER_FOGGED": "Hidden by fog of war",
+  "MAP_HOVER_ROADS": "roads",
+  "MAP_HOVER_NO_ROAD": "no road",
+  "POI_CAT_SCHEMATIC": "Schematics / recipes",
+  "POI_CAT_QUEST": "Quest locations",
+  "POI_CAT_CAMP": "Camp spots",
+  "POI_CAT_WAREHOUSE": "Warehouses",
+  "POI_CAT_STATION": "Stations and trader",
+  "POI_CAT_DUNGEON": "Dungeons",
+  "POI_CAT_LANDMARK": "Other landmarks",
+  "POI_CAT_FILLER": "Generator filler"
 }
