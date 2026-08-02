@@ -11,64 +11,42 @@ it.
 
 ## One-time setup
 
-1. Install [Node.js](https://nodejs.org) — only to run the patch script.
+1. Restore clean game files: Steam → Scrap Mechanic → Properties → Installed
+   Files → **Verify integrity of game files**. Do this before anything else, so
+   the copies ScrapMap keeps to restore from are genuinely untouched.
 
-2. Clone the repository:
+2. Both of you download **the same version** of `scrapmap.exe`. Nothing to
+   install, and no Node or checkout required — the Lua is inside the binary,
+   which is what makes "the same version" mean "the same bytes".
 
-   ```bash
-   git clone https://github.com/glazunovds/ScrapMap.git
-   ```
-
-3. Restore clean game files: Steam → Scrap Mechanic → Properties → Installed
-   Files → **Verify integrity of game files**.
-
-4. Record the baseline the patch applies to and reverts to:
-
-   ```bash
-   node tools/game-patch.mjs snapshot
-   ```
-
-   The script finds the game in the usual Steam library locations. If it does
-   not, add `--game="<path to the Scrap Mechanic folder>"`.
+3. Add `-dev` to Scrap Mechanic's launch options in Steam. Without it the game
+   ignores the patched scripts entirely.
 
 ## Before playing together
 
-Both of you, from the **same repository revision** — `git pull`, then check
-`git log -1` shows the same commit:
+Both of you: **Tray → Install game patch**.
 
-```bash
-node tools/game-patch.mjs apply
-```
+ScrapMap records the untouched files the first time, so there is no separate
+snapshot step. It writes the addons with normalised line endings, because a
+checkout with `core.autocrlf` would otherwise change a byte and one byte is a
+refused connection.
 
-The script prints a hash per file. **Compare them.** All five must match. If any
-differ you will not be able to connect.
-
-If hashes disagree it is almost always line endings: git on Windows converts LF
-to CRLF on checkout by default, which changes the bytes. `git pull` and run
-`apply` again — the script normalises line endings on install, and
-`.gitattributes` pins them in the repository.
-
-If the three addon files match but `SurvivalGame.lua` or `terrain_overworld.lua`
-differ, that is a different problem: those are rebuilt from each machine's own
-game files, so a mismatch means your game versions differ.
-
-Launch through Steam with `-dev` in the launch options — without it the game
-ignores the patched scripts entirely.
+The one rule: **the same ScrapMap version on both machines.** Different versions
+may carry different Lua, and the game compares checksums when you connect.
 
 ## To play with someone unpatched
 
-```bash
-node tools/game-patch.mjs revert
-```
+**Tray → Restore game files.** The game returns to stock and you can join
+anyone. The map, fog and markers keep working — the tile atlas is cached
+locally and does not depend on the patch.
 
-Game files return to stock and you can join anyone. The map, fog and markers
-keep working; the tile atlas is cached locally and does not depend on the patch.
+## If the connection is refused
 
-## Checking state
+`Invalid checksum` means the two installs disagree. In order of likelihood:
 
-```bash
-node tools/game-patch.mjs status
-```
+- different ScrapMap versions — compare them and use one;
+- one of you has not applied the patch, or has applied it and not reloaded;
+- your game versions differ, in which case verify files and start again.
 
 ## What the test is for
 
