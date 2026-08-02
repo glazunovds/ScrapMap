@@ -767,6 +767,19 @@ body[data-profile-state="error"] .toggle-row {
   outline: 0;
 }
 
+/* A photographed point of interest shows the photograph instead of its
+   silhouette. Same footprint as the glyph so the list does not reflow when one
+   arrives. */
+.poi-search-photo {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  object-fit: cover;
+  image-rendering: auto;
+}
+
 .poi-search-glyph {
   --poi-color: #84d38c;
   --poi-fill: #203724;
@@ -1566,7 +1579,20 @@ body.map-expanded .poi-search-result {
   gap: 10px;
 }
 
-body.map-expanded .poi-search-glyph {
+body.map-expanded /* A photographed point of interest shows the photograph instead of its
+   silhouette. Same footprint as the glyph so the list does not reflow when one
+   arrives. */
+.poi-search-photo {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  object-fit: cover;
+  image-rendering: auto;
+}
+
+.poi-search-glyph {
   width: 26px;
   height: 26px;
   font-size: 11px;

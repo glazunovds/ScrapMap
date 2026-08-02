@@ -567,6 +567,10 @@
       tileAtlas.revision += 1;
       invalidateStaticFrame();
       scheduleRender();
+      // The search list may have been drawn before this arrived.
+      if (elements.poiSearchResults && !elements.poiSearchResults.hidden) {
+        renderPoiSearch();
+      }
     };
     image.onerror = () => {
       record.status = "failed";
@@ -1816,7 +1820,15 @@
       const coordinates = record.representative;
       detail.textContent = `${coordinates.x} : ${coordinates.y} · ${record.nameEn}`;
       text.append(name, detail);
-      button.append(glyph, text);
+
+      // Drawn larger than it is shown so the expanded panel stays crisp.
+      const photo = poiPhotoThumbnail(record, 64);
+      if (photo) {
+        photo.className = "poi-search-photo";
+        button.append(photo, text);
+      } else {
+        button.append(glyph, text);
+      }
       resultsElement.appendChild(button);
     });
   }
@@ -1832,6 +1844,29 @@
       });
     }
     return counts;
+  }
+
+  // A thumbnail of the tile's photograph, or null when there is not one.
+  //
+  // The sweep's photographs are otherwise only visible by scrolling the map to
+  // the right spot; in the search results they turn a list of names into a list
+  // of places. Falls back to the category silhouette, which is what every tile
+  // without a photograph still gets.
+  function poiPhotoThumbnail(record, size = 40) {
+    const uuid = String(record?.tileUuid || "").toLowerCase();
+    if (!uuid || !tileAtlas.entries.size) return null;
+    const entry = tileAtlas.entries.get(uuid);
+    if (!entry || entry.topDownSourceKind !== "photo") return null;
+    const image = atlasImage(entry);
+    if (!image?.width) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(image, 0, 0, image.width, image.height, 0, 0, size, size);
+    return canvas;
   }
 
   /** Renders one category silhouette into a small canvas for the filter list. */

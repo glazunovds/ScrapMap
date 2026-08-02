@@ -479,6 +479,9 @@
           ].map(String).filter(Boolean))),
           glyph: definition.glyph,
           cells: [],
+          // The tile this point of interest sits on, so the panel can show the
+          // photograph of it rather than only a category silhouette.
+          tileUuid: String(cell.uuid || cell.tileKey || "").toLowerCase() || null,
           representative: { x: cell.x, y: cell.y, key: cell.key }
         };
         record.searchText = [
