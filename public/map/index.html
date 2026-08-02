@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Scrap Mechanic — локальная карта</title>
+  <title>Scrap Mechanic — local map</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="overlay.css">
 </head>
@@ -15,31 +15,31 @@
         <span class="brand-mark" aria-hidden="true">SM</span>
         <div>
           <strong>LOCAL TERRAIN MAP</strong>
-          <span id="connectionLabel">демонстрационные данные</span>
+          <span id="connectionLabel" data-i18n="HEADER_CONNECTION_DEMO">demonstration data</span>
         </div>
       </div>
       <div class="top-actions">
-        <button class="button button-ghost" id="loadDemoButton" type="button">Демо</button>
-        <button class="button button-ghost" id="dataButton" type="button" aria-expanded="false">Данные</button>
+        <button class="button button-ghost" id="loadDemoButton" type="button" data-i18n="HEADER_DEMO">Demo</button>
+        <button class="button button-ghost" id="dataButton" type="button" aria-expanded="false" data-i18n="HEADER_DATA">Data</button>
         <button class="button button-primary" id="expandButton" type="button" aria-pressed="false">
-          <span class="when-mini">Развернуть карту</span>
-          <span class="when-expanded">Свернуть</span>
+          <span class="when-mini" data-i18n="HEADER_EXPAND">Expand map</span>
+          <span class="when-expanded" data-i18n="HEADER_COLLAPSE">Collapse</span>
         </button>
       </div>
     </header>
 
     <main class="workspace">
-      <section class="map-panel" aria-label="Карта мира">
+      <section class="map-panel" aria-label="World map" data-i18n-attr="aria-label:MAP_REGION_LABEL">
         <canvas
           id="mapCanvas"
           tabindex="0"
           role="img"
-          aria-label="Схематическая карта мира Scrap Mechanic. Двойной щелчок ставит или убирает локальную метку."
+          aria-label="Schematic map of the Scrap Mechanic world. Double-click to place or remove a local marker." data-i18n-attr="aria-label:MAP_CANVAS_LABEL"
         ></canvas>
 
         <div class="map-chrome map-chrome-left">
           <div class="location-card">
-            <span class="eyebrow">ТЕКУЩАЯ ЯЧЕЙКА</span>
+            <span class="eyebrow" data-i18n="MAP_CURRENT_CELL">CURRENT CELL</span>
             <strong id="cellLabel">0 : 0</strong>
             <span id="positionLabel">X 0 · Y 0</span>
           </div>
@@ -50,12 +50,12 @@
         </div>
 
         <div class="map-chrome map-chrome-right">
-          <button class="tool-button" id="zoomInButton" type="button" title="Приблизить" aria-label="Приблизить">+</button>
-          <button class="tool-button" id="zoomOutButton" type="button" title="Отдалить" aria-label="Отдалить">−</button>
-          <button class="tool-button tool-button-text" id="centerButton" type="button" title="Вернуться к игроку">ЦЕНТР</button>
-          <button class="tool-button tool-button-marker" id="markerModeButton" type="button" aria-pressed="false" title="Режим локальных меток">
+          <button class="tool-button" id="zoomInButton" type="button" title="Zoom in" aria-label="Zoom in" data-i18n-attr="title:MAP_ZOOM_IN,aria-label:MAP_ZOOM_IN">+</button>
+          <button class="tool-button" id="zoomOutButton" type="button" title="Zoom out" aria-label="Zoom out" data-i18n-attr="title:MAP_ZOOM_OUT,aria-label:MAP_ZOOM_OUT">−</button>
+          <button class="tool-button tool-button-text" id="centerButton" type="button" title="Back to player" data-i18n-attr="title:MAP_CENTRE" data-i18n="MAP_CENTRE_SHORT">CENTRE</button>
+          <button class="tool-button tool-button-marker" id="markerModeButton" type="button" aria-pressed="false" title="Local marker mode" data-i18n-attr="title:MAP_MARKER_MODE">
             <span aria-hidden="true">×</span>
-            <small>МЕТКА</small>
+            <small data-i18n="MAP_MARKER_SHORT">MARK</small>
           </button>
         </div>
 
@@ -66,13 +66,13 @@
 
         <div class="hover-card" id="hoverCard" hidden>
           <span id="hoverCoordinates">0 : 0</span>
-          <strong id="hoverTitle">Неизвестная клетка</strong>
-          <small id="hoverDetails">Нет данных</small>
+          <strong id="hoverTitle" data-i18n="MAP_HOVER_UNKNOWN">Unknown cell</strong>
+          <small id="hoverDetails" data-i18n="MAP_HOVER_NO_DATA">No data</small>
         </div>
 
         <div class="map-footer">
-          <span id="mapHint">Двойной щелчок — поставить ×</span>
-          <span id="zoomLabel">МАСШТАБ 100%</span>
+          <span id="mapHint" data-i18n="MAP_HINT_DOUBLE_CLICK">Double-click to place ×</span>
+          <span id="zoomLabel">SCALE 100%</span>
         </div>
       </section>
 
@@ -80,8 +80,8 @@
         <section class="panel-section overview-section">
           <div class="section-heading">
             <div>
-              <span class="eyebrow">СЕАНС</span>
-              <h1>Обзор мира</h1>
+              <span class="eyebrow" data-i18n="SESSION_EYEBROW">SESSION</span>
+              <h1 data-i18n="SESSION_TITLE">World overview</h1>
             </div>
             <button
               class="live-badge profile-status-button"
@@ -89,68 +89,68 @@
               type="button"
               aria-haspopup="dialog"
               aria-controls="profileDialog"
-            >ОПРЕДЕЛЯЕМ…</button>
+             data-i18n="BADGE_RESOLVING">RESOLVING…</button>
           </div>
-          <p class="profile-summary" id="profileSummary">Определяем профиль карты…</p>
+          <p class="profile-summary" id="profileSummary" data-i18n="SESSION_RESOLVING_SUMMARY">Working out which map profile this is…</p>
           <div class="metric-grid">
             <div class="metric">
-              <span>Исследовано</span>
+              <span data-i18n="SESSION_EXPLORED">Explored</span>
               <strong id="visitedMetric">0%</strong>
-              <small id="visitedDetail">0 из 0 клеток</small>
+              <small id="visitedDetail" data-i18n="SESSION_EXPLORED_DETAIL">0 of 0 cells</small>
             </div>
             <div class="metric">
-              <span>Локальные ×</span>
+              <span data-i18n="SESSION_LOCAL_MARKERS">Local ×</span>
               <strong id="markersMetric">0</strong>
-              <small>для этого мира</small>
+              <small data-i18n="SESSION_LOCAL_MARKERS_DETAIL">in this world</small>
             </div>
           </div>
           <label class="toggle-row">
             <input id="fogToggle" type="checkbox" checked>
             <span class="toggle-track" aria-hidden="true"><i></i></span>
             <span>
-              <strong>Туман войны</strong>
-              <small>скрывать непосещённые клетки</small>
+              <strong data-i18n="SESSION_FOG_TITLE">Fog of war</strong>
+              <small data-i18n="SESSION_FOG_SUBTITLE">hide cells you have not visited</small>
             </span>
           </label>
           <div class="fog-actions">
             <button id="revealAllButton" type="button" class="button button-ghost">
-              Открыть всю карту
+              <span data-i18n="SESSION_REVEAL_ALL">Reveal the whole map</span>
             </button>
-            <small>Отмечает все клетки посещёнными, туман остаётся включён</small>
+            <small data-i18n="SESSION_REVEAL_ALL_NOTE">Marks every cell visited. Fog stays switched on.</small>
           </div>
           <div class="fog-actions">
             <button id="poiCaptureButton" type="button" class="button button-ghost">
-              Отснять точки интереса
+              <span data-i18n="SESSION_PHOTOGRAPH_POI">Photograph points of interest</span>
             </button>
-            <small id="poiCaptureNote">Камера облетит POI и сфотографирует их сверху. Съёмка начнётся при следующей загрузке мира.</small>
+            <small id="poiCaptureNote" data-i18n="SESSION_PHOTOGRAPH_POI_NOTE">The camera flies over each point of interest and photographs it from above. The sweep starts on the next world load.</small>
           </div>
         </section>
 
         <section class="panel-section">
           <div class="section-heading compact">
             <div>
-              <span class="eyebrow">МИНИ-КАРТА</span>
-              <h2>Размер и угол</h2>
+              <span class="eyebrow" data-i18n="MINIMAP_EYEBROW">MINIMAP</span>
+              <h2 data-i18n="MINIMAP_TITLE">Size and corner</h2>
             </div>
           </div>
-          <p class="section-copy">Игра держит трекер заданий справа, поэтому мини-карту бывает удобнее сдвинуть.</p>
+          <p class="section-copy" data-i18n="MINIMAP_COPY">The game keeps its quest tracker on the right, so the minimap is often better moved.</p>
           <div class="mini-layout-row">
             <label>
-              <span>Угол</span>
+              <span data-i18n="MINIMAP_CORNER">Corner</span>
               <select id="miniCornerSelect">
-                <option value="0">Слева сверху</option>
-                <option value="1" selected>Справа сверху</option>
-                <option value="2">Слева снизу</option>
-                <option value="3">Справа снизу</option>
+                <option value="0" data-i18n="MINIMAP_CORNER_TOP_LEFT">Top left</option>
+                <option value="1" selected data-i18n="MINIMAP_CORNER_TOP_RIGHT">Top right</option>
+                <option value="2" data-i18n="MINIMAP_CORNER_BOTTOM_LEFT">Bottom left</option>
+                <option value="3" data-i18n="MINIMAP_CORNER_BOTTOM_RIGHT">Bottom right</option>
               </select>
             </label>
             <label>
-              <span>Размер</span>
+              <span data-i18n="MINIMAP_SIZE">Size</span>
               <select id="miniSizeSelect">
-                <option value="280">Маленькая</option>
-                <option value="350">Средняя</option>
-                <option value="420" selected>Обычная</option>
-                <option value="520">Крупная</option>
+                <option value="280" data-i18n="MINIMAP_SIZE_SMALL">Small</option>
+                <option value="350" data-i18n="MINIMAP_SIZE_MEDIUM">Medium</option>
+                <option value="420" selected data-i18n="MINIMAP_SIZE_NORMAL">Normal</option>
+                <option value="520" data-i18n="MINIMAP_SIZE_LARGE">Large</option>
               </select>
             </label>
           </div>
@@ -159,59 +159,72 @@
         <section class="panel-section poi-filter-section">
           <div class="section-heading compact">
             <div>
-              <span class="eyebrow">ТОЧКИ ИНТЕРЕСА</span>
-              <h2>Что показывать</h2>
+              <span class="eyebrow" data-i18n="POI_EYEBROW">POINTS OF INTEREST</span>
+              <h2 data-i18n="POI_TITLE">What to show</h2>
             </div>
             <span class="poi-count" id="poiMetric">0/0</span>
           </div>
-          <p class="section-copy">Цветные точки видны при любом масштабе. Настройка запоминается отдельно для каждого мира.</p>
+          <p class="section-copy" data-i18n="POI_COPY">Coloured dots stay visible at any zoom. The setting is remembered per world.</p>
           <label class="poi-search">
-            <span class="sr-only">Поиск точки интереса</span>
+            <span class="sr-only" data-i18n="POI_SEARCH_LABEL">Search points of interest</span>
             <input
               id="poiSearchInput"
               type="search"
               autocomplete="off"
-              placeholder="Найти POI, рецепт или координаты"
+              placeholder="Find a POI, a recipe or coordinates" data-i18n-attr="placeholder:POI_SEARCH_PLACEHOLDER"
               aria-controls="poiSearchResults"
             >
           </label>
           <div class="poi-search-results" id="poiSearchResults" aria-live="polite"></div>
           <div class="poi-filter-actions">
-            <button id="schematicOnlyButton" type="button">Только схемоботы</button>
-            <button id="showAllPoiButton" type="button">Все</button>
-            <button id="hideAllPoiButton" type="button">Скрыть</button>
+            <button id="schematicOnlyButton" type="button" data-i18n="POI_ONLY_SCHEMATICS">Schematics only</button>
+            <button id="showAllPoiButton" type="button" data-i18n="POI_SHOW_ALL">All</button>
+            <button id="hideAllPoiButton" type="button" data-i18n="POI_HIDE_ALL">Hide</button>
           </div>
-          <div class="poi-filter-list" id="poiFilterList" aria-label="Фильтры точек интереса"></div>
+          <div class="poi-filter-list" id="poiFilterList" aria-label="Point of interest filters" data-i18n-attr="aria-label:POI_FILTER_LIST_LABEL"></div>
         </section>
 
         <section class="panel-section">
           <div class="section-heading compact">
             <div>
-              <span class="eyebrow">ЛОКАЛЬНЫЕ ДАННЫЕ</span>
-              <h2>Метки с крестиком</h2>
+              <span class="eyebrow" data-i18n="MARKERS_EYEBROW">LOCAL DATA</span>
+              <h2 data-i18n="MARKERS_TITLE">Cross markers</h2>
             </div>
-            <button class="text-button" id="exportMarkersButton" type="button">Экспорт</button>
+            <button class="text-button" id="exportMarkersButton" type="button" data-i18n="MARKERS_EXPORT">Export</button>
           </div>
-          <p class="section-copy">Включите «Метка» и нажмите на клетку. Повторное нажатие убирает крестик.</p>
+          <p class="section-copy" data-i18n="MARKERS_COPY">Turn on the marker mode and click a cell. Clicking again removes the cross.</p>
           <div class="marker-list" id="markerList">
-            <p class="empty-state">Меток пока нет</p>
+            <p class="empty-state" data-i18n="MARKERS_EMPTY">No markers yet</p>
           </div>
-          <button class="danger-link" id="clearMarkersButton" type="button">Удалить мои метки этого мира</button>
+          <button class="danger-link" id="clearMarkersButton" type="button" data-i18n="MARKERS_CLEAR">Delete my markers in this world</button>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow" data-i18n="LANGUAGE_EYEBROW">LANGUAGE</span>
+              <h2 data-i18n="LANGUAGE_TITLE">Interface language</h2>
+            </div>
+          </div>
+          <p class="section-copy" data-i18n="LANGUAGE_COPY">Applies immediately and is remembered on this machine.</p>
+          <label class="field">
+            <select id="languageSelect"></select>
+          </label>
         </section>
 
         <section class="panel-section legend-section">
-          <span class="eyebrow">УСЛОВНЫЕ ОБОЗНАЧЕНИЯ</span>
+          <span class="eyebrow" data-i18n="LEGEND_EYEBROW">LEGEND</span>
           <div class="legend-grid">
-            <span><i class="swatch swatch-meadow"></i>Луга</span>
-            <span><i class="swatch swatch-forest"></i>Лес</span>
-            <span><i class="swatch swatch-desert"></i>Пустыня</span>
-            <span><i class="swatch swatch-field"></i>Поля</span>
-            <span><i class="swatch swatch-autumn"></i>Осенний лес</span>
-            <span><i class="swatch swatch-burnt"></i>Пожарище</span>
-            <span><i class="swatch swatch-rock"></i>Скалы</span>
-            <span><i class="swatch swatch-lake"></i>Вода</span>
-            <span><i class="road-swatch"></i>Дорога</span>
-            <span><i class="poi-swatch">P</i>Точка интереса</span>
+            <span><i class="swatch swatch-meadow"></i><span data-i18n="LEGEND_MEADOW">Meadow</span></span>
+            <span><i class="swatch swatch-forest"></i><span data-i18n="LEGEND_FOREST">Forest</span></span>
+            <span><i class="swatch swatch-desert"></i><span data-i18n="LEGEND_DESERT">Desert</span></span>
+            <span><i class="swatch swatch-field"></i><span data-i18n="LEGEND_FIELD">Fields</span></span>
+            <span><i class="swatch swatch-autumn"></i><span data-i18n="LEGEND_AUTUMN">Autumn forest</span></span>
+            <span><i class="swatch swatch-burnt"></i><span data-i18n="LEGEND_BURNT">Burnt ground</span></span>
+            <span><i class="swatch swatch-rock"></i><span data-i18n="LEGEND_ROCK">Rock</span></span>
+            <span><i class="swatch swatch-lake"></i><span data-i18n="LEGEND_WATER">Water</span></span>
+            <span><i class="road-swatch"></i><span data-i18n="LEGEND_ROAD">Road</span></span>
+            <span><i class="poi-swatch">P</i><span data-i18n="LEGEND_POI">Point of interest</span></span>
           </div>
         </section>
       </aside>
@@ -222,18 +235,18 @@
       <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
         <div class="drawer-header">
           <div>
-            <span class="eyebrow">ИМПОРТ JSON</span>
-            <h2 id="drawerTitle">Источники карты</h2>
+            <span class="eyebrow" data-i18n="DRAWER_EYEBROW">IMPORT JSON</span>
+            <h2 id="drawerTitle" data-i18n="DRAWER_TITLE">Map sources</h2>
           </div>
-          <button class="close-button" id="closeDrawerButton" type="button" aria-label="Закрыть">×</button>
+          <button class="close-button" id="closeDrawerButton" type="button" aria-label="Close" data-i18n-attr="aria-label:DRAWER_CLOSE">×</button>
         </div>
-        <p>Можно выбрать один комплект или четыре отдельных файла. Все данные обрабатываются только в этой вкладке.</p>
+        <p data-i18n="DRAWER_COPY">Choose one bundle or four separate files. Everything is processed in this tab only.</p>
 
         <label class="bundle-drop" id="bundleDrop">
           <input id="bundleInput" type="file" accept=".json,application/json" multiple>
-          <strong>Перетащите JSON сюда</strong>
-          <span>layout, telemetry, visited, markers или общий bundle</span>
-          <em>ВЫБРАТЬ ФАЙЛЫ</em>
+          <strong data-i18n="DRAWER_DROP_TITLE">Drop JSON here</strong>
+          <span data-i18n="DRAWER_DROP_SUBTITLE">layout, telemetry, visited, markers, or a combined bundle</span>
+          <em data-i18n="DRAWER_CHOOSE_FILES">CHOOSE FILES</em>
         </label>
 
         <div class="file-grid">
@@ -241,55 +254,55 @@
             <input id="layoutInput" type="file" accept=".json,application/json">
             <span>01</span>
             <strong>Layout</strong>
-            <small>сетка, UUID, дороги, POI</small>
-            <b id="layoutFileStatus">не выбран</b>
+            <small data-i18n="DRAWER_LAYOUT_NOTE">grid, UUIDs, roads, POIs</small>
+            <b id="layoutFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
           </label>
           <label class="file-card">
             <input id="telemetryInput" type="file" accept=".json,application/json">
             <span>02</span>
             <strong>Telemetry</strong>
-            <small>позиция и направление игрока</small>
-            <b id="telemetryFileStatus">не выбран</b>
+            <small data-i18n="DRAWER_TELEMETRY_NOTE">player position and heading</small>
+            <b id="telemetryFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
           </label>
           <label class="file-card">
             <input id="visitedInput" type="file" accept=".json,application/json">
             <span>03</span>
             <strong>Visited</strong>
-            <small>локально открытые клетки</small>
-            <b id="visitedFileStatus">не выбран</b>
+            <small data-i18n="DRAWER_VISITED_NOTE">locally revealed cells</small>
+            <b id="visitedFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
           </label>
           <label class="file-card">
             <input id="markersInput" type="file" accept=".json,application/json">
             <span>04</span>
             <strong>Markers</strong>
-            <small>импортированные метки</small>
-            <b id="markersFileStatus">не выбран</b>
+            <small data-i18n="DRAWER_MARKERS_NOTE">imported markers</small>
+            <b id="markersFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
           </label>
         </div>
 
         <div class="drawer-note">
-          <strong>Для будущего лоадера</strong>
-          <span>Страница также принимает <code>window.postMessage</code> и вызовы <code>window.SMMinimap</code> без перезагрузки.</span>
+          <strong data-i18n="DRAWER_LOADER_TITLE">For a future loader</strong>
+          <span data-i18n="DRAWER_LOADER_COPY">The page also accepts window.postMessage and window.SMMinimap calls without reloading.</span>
         </div>
       </div>
     </section>
 
     <section class="profile-dialog" id="profileDialog" aria-hidden="true">
-      <button class="profile-dialog-backdrop" id="profileDialogBackdrop" type="button" aria-label="Закрыть выбор профиля"></button>
+      <button class="profile-dialog-backdrop" id="profileDialogBackdrop" type="button" aria-label="Close profile chooser" data-i18n-attr="aria-label:PROFILE_DIALOG_CLOSE"></button>
       <div class="profile-dialog-card" role="dialog" aria-modal="true" aria-labelledby="profileDialogTitle">
         <div class="drawer-header">
           <div>
-            <span class="eyebrow">ПРОФИЛЬ КАРТЫ</span>
-            <h2 id="profileDialogTitle">Какой это сервер?</h2>
+            <span class="eyebrow" data-i18n="PROFILE_EYEBROW">MAP PROFILE</span>
+            <h2 id="profileDialogTitle" data-i18n="PROFILE_DIALOG_TITLE">Which server is this?</h2>
           </div>
-          <button class="close-button" id="profileDialogClose" type="button" aria-label="Закрыть">×</button>
+          <button class="close-button" id="profileDialogClose" type="button" aria-label="Close" data-i18n-attr="aria-label:DRAWER_CLOSE">×</button>
         </div>
         <p class="profile-dialog-copy" id="profileDialogCopy">
-          Идентификатор сервера недоступен. Выберите профиль, чтобы туман и метки одинаковых карт не смешались.
+          <span data-i18n="PROFILE_DIALOG_COPY">The server could not be identified. Pick a profile so that fog and markers from identical maps do not mix.</span>
         </p>
         <div class="profile-candidate-list" id="profileCandidateList"></div>
         <form class="profile-create-form" id="profileCreateForm">
-          <label for="profileNameInput">Новый профиль</label>
+          <label for="profileNameInput" data-i18n="PROFILE_NEW_LABEL">New profile</label>
           <div>
             <input
               id="profileNameInput"
@@ -297,9 +310,9 @@
               type="text"
               maxlength="80"
               autocomplete="off"
-              placeholder="Например, сервер друга"
+              placeholder="For example, a friend's server" data-i18n-attr="placeholder:PROFILE_NEW_PLACEHOLDER"
             >
-            <button class="button button-primary" type="submit">Создать</button>
+            <button class="button button-primary" type="submit" data-i18n="PROFILE_CREATE">Create</button>
           </div>
         </form>
         <p class="profile-dialog-status" id="profileDialogStatus" role="status" aria-live="polite"></p>
@@ -311,7 +324,8 @@
 
   <script src="map-core.js"></script>
   <script src="runtime-data.js"></script>
-  <script src="app.js"></script>
+  <script src="i18n.js"></script>
+    <script src="app.js"></script>
   <script src="overlay-bridge.js"></script>
 </body>
 </html>

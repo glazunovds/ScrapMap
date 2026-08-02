@@ -519,6 +519,36 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
     }))
 }
 
+/// Interface strings for the tray, from the same dictionaries the panel uses.
+///
+/// Compiled in, because the tray is built before a WebView exists to ask. The
+/// language is read from where the panel stores it, so the two agree after a
+/// restart; the menu cannot rebuild itself mid-session.
+fn tray_text() -> impl Fn(&str) -> String {
+    const EN: &str = include_str!("../../public/map/locales/en.json");
+    const RU: &str = include_str!("../../public/map/locales/ru.json");
+
+    let language = atlas_bake::atlas_root()
+        .and_then(|root| fs::read_to_string(root.join("language.txt")).ok())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "en".to_owned());
+
+    let english: serde_json::Value = serde_json::from_str(EN).unwrap_or(serde_json::Value::Null);
+    let chosen: serde_json::Value = match language.as_str() {
+        "ru" => serde_json::from_str(RU).unwrap_or(serde_json::Value::Null),
+        _ => serde_json::Value::Null,
+    };
+
+    move |key: &str| {
+        chosen
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| english.get(key).and_then(serde_json::Value::as_str))
+            .unwrap_or(key)
+            .to_owned()
+    }
+}
+
 /// A tray icon with the things you need when the overlay itself is hidden.
 ///
 /// The overlay has no taskbar entry and no window chrome, so before this the
@@ -532,15 +562,17 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
         tray::TrayIconBuilder,
     };
 
+    let text = tray_text();
+
     let show = MenuItem::with_id(app, "toggle", "Показать / скрыть карту", true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    let expand = MenuItem::with_id(app, "expand", "Полная карта", true, None::<&str>)
+    let expand = MenuItem::with_id(app, "expand", text("TRAY_EXPAND"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    let apply = MenuItem::with_id(app, "apply", "Установить патч игры", true, None::<&str>)
+    let apply = MenuItem::with_id(app, "apply", text("TRAY_APPLY_PATCH"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    let revert = MenuItem::with_id(app, "revert", "Вернуть файлы игры", true, None::<&str>)
+    let revert = MenuItem::with_id(app, "revert", text("TRAY_REVERT_PATCH"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)
+    let quit = MenuItem::with_id(app, "quit", text("TRAY_QUIT"), true, None::<&str>)
         .map_err(|error| error.to_string())?;
     let separator = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
 
@@ -609,6 +641,24 @@ fn patch_targets(state: &OverlayState) -> Result<(PathBuf, PathBuf), String> {
         .ok_or("could not find Scrap Mechanic")?;
     let cache_root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
     Ok((game_root, cache_root))
+}
+
+/// Remembers the interface language for the parts built before the WebView.
+#[tauri::command]
+fn set_interface_language(language: String) -> Result<(), String> {
+    // Bounded and lowercased: this becomes a filename lookup and a menu label.
+    let language: String = language
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .take(8)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if language.is_empty() {
+        return Err("not a language code".to_owned());
+    }
+    let root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    fs::write(root.join("language.txt"), language).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1246,6 +1296,7 @@ pub fn run() {
             diagnostic_status,
             game_layout_snapshot,
             atlas_bake_refresh,
+            set_interface_language,
             game_patch_status,
             game_patch_apply,
             game_patch_revert,

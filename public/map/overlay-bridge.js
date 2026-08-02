@@ -1,6 +1,19 @@
 (function connectTauriOverlay() {
   "use strict";
 
+  /** Interface string by key. Falls back to the key so a missing i18n layer
+   *  degrades to something identifiable rather than to blank UI. */
+  const text = (key) => window.SMText?.t(key) ?? key;
+
+  // The tray menu is built before a WebView exists to ask, so the choice is
+  // left where the native side can read it on the next start.
+  window.addEventListener("sm-minimap:language", (event) => {
+    const language = String(event?.detail?.language || "");
+    if (language && invoke) {
+      invoke("set_interface_language", { language }).catch(() => {});
+    }
+  });
+
   const tauri = window.__TAURI__;
   const invoke = tauri?.core?.invoke;
   const listen = tauri?.event?.listen;
@@ -268,33 +281,33 @@
     const profile = snapshot?.profile || {};
     if (state === "loading" || state === "switching") {
       return {
-        badge: state === "switching" ? "ПЕРЕКЛЮЧАЕМ…" : "ОПРЕДЕЛЯЕМ…",
-        summary: "Определяем профиль карты…"
+        badge: text(state === "switching" ? "BADGE_SWITCHING" : "BADGE_RESOLVING"),
+        summary: text("SESSION_RESOLVING_SUMMARY")
       };
     }
     if (state === "error") {
       return {
-        badge: "ОШИБКА",
-        summary: "Профиль не загружен — откройте выбор и повторите."
+        badge: text("BADGE_ERROR"),
+        summary: text("SUMMARY_ERROR")
       };
     }
     if (profile.needsManualDisambiguation === true) {
       return {
-        badge: "СЕРВЕР?",
-        summary: "Выберите профиль: сохранение пока приостановлено."
+        badge: text("BADGE_SERVER_UNKNOWN"),
+        summary: text("SUMMARY_SERVER_UNKNOWN")
       };
     }
     if (profile.scopeKind === "local") {
-      return { badge: "ЛОКАЛ", summary: "Локальный мир" };
+      return { badge: text("BADGE_LOCAL"), summary: text("SUMMARY_LOCAL") };
     }
     if (profile.identityQuality === "manual") {
       return {
-        badge: "РУЧНОЙ",
+        badge: text("BADGE_MANUAL"),
         summary:
-          boundedText(profile.displayName, 80) || "Именованный сервер"
+          boundedText(profile.displayName, 80) || text("SUMMARY_MANUAL")
       };
     }
-    return { badge: "СЕРВЕР", summary: "Сервер распознан автоматически" };
+    return { badge: text("BADGE_SERVER"), summary: text("SUMMARY_SERVER") };
   }
 
   function renderProfileCandidates(snapshot) {

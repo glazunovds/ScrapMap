@@ -8,9 +8,20 @@ Private project for two people. It does not need enterprise security, an
 installer, or elaborate architecture — but it does touch a running game, so the
 constraints below are real.
 
-**Repository language is English.** Docs, comments, commit messages and
-identifiers are English. The overlay's own UI strings are Russian on purpose,
-because that is what its users read; do not "fix" those.
+**Repository language is English**, and so is the interface. Docs, comments,
+commit messages and identifiers are English.
+
+Interface strings live in `public/map/locales/<code>.json`, keyed like
+`SESSION_REVEAL_ALL`. English is the default and the fallback; a key missing
+from a translation falls back to English rather than rendering blank. Adding a
+language is a new file plus an entry in `LANGUAGES` in `public/map/i18n.js` --
+no other code changes. **Do not put literal user-facing text in markup or
+scripts**; add a key.
+
+The tray menu is built before a WebView exists, so it reads the same
+dictionaries at compile time through `include_str!` and takes the language from
+`%LOCALAPPDATA%\ScrapMap\language.txt`, which the panel writes. That means the
+tray follows the panel one restart later.
 
 ## Layout
 
