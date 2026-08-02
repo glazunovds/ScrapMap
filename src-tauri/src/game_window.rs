@@ -204,6 +204,9 @@ impl MiniCorner {
     }
 }
 
+/// The shipped defaults, kept as the reference the geometry tests measure
+/// against now that the running overlay reads size and corner from settings.
+#[cfg(test)]
 pub fn default_mini_overlay_geometry(client: ScreenRect, dpi: u32) -> Option<OverlayGeometry> {
     mini_overlay_geometry(
         client,
