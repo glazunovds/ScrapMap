@@ -3,6 +3,7 @@ mod atlas_bake;
 mod diagnostic_source;
 mod game_build;
 mod game_log_source;
+mod game_patch;
 mod game_window;
 mod native_process;
 mod poi_capture;
@@ -13,7 +14,7 @@ mod window_capture;
 
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering},
         Mutex,
@@ -516,6 +517,116 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
         "rotatedPlacements": rotated,
         "note": "reload the survival world to run the sweep",
     }))
+}
+
+/// A tray icon with the things you need when the overlay itself is hidden.
+///
+/// The overlay has no taskbar entry and no window chrome, so before this the
+/// only ways to reach it were global shortcuts you had to already know. The
+/// patch entries matter more: applying and reverting is what a player does
+/// around playing with someone else, and it used to mean a terminal, Node, and
+/// a checkout of this repository.
+fn install_tray(app: &AppHandle) -> Result<(), String> {
+    use tauri::{
+        menu::{Menu, MenuItem, PredefinedMenuItem},
+        tray::TrayIconBuilder,
+    };
+
+    let show = MenuItem::with_id(app, "toggle", "Показать / скрыть карту", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let expand = MenuItem::with_id(app, "expand", "Полная карта", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let apply = MenuItem::with_id(app, "apply", "Установить патч игры", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let revert = MenuItem::with_id(app, "revert", "Вернуть файлы игры", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let separator = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
+
+    let menu = Menu::with_items(
+        app,
+        &[&show, &expand, &separator, &apply, &revert, &separator, &quit],
+    )
+    .map_err(|error| error.to_string())?;
+
+    let mut tray = TrayIconBuilder::with_id("scrapmap")
+        .tooltip("ScrapMap")
+        .menu(&menu)
+        .show_menu_on_left_click(false);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.on_menu_event(|app, event| {
+        let state = app.state::<OverlayState>();
+        let outcome = match event.id().as_ref() {
+            "toggle" => {
+                let visible = !state.user_visible.load(Ordering::Acquire);
+                state.user_visible.store(visible, Ordering::Release);
+                main_window(app).and_then(|window| {
+                    synchronize_with_game(&window, &state, &current_game_poll(), false)
+                })
+            }
+            "expand" => apply_overlay_mode(app, &state, true),
+            // Patching rewrites files the game reads only at startup, so the
+            // result is reported rather than acted on further.
+            "apply" => game_patch_apply(state.clone()).map(|status| {
+                println!("ScrapMap patch applied: {}", status.applied);
+            }),
+            "revert" => game_patch_revert(state.clone()).map(|status| {
+                println!("ScrapMap patch reverted: applied={}", status.applied);
+            }),
+            "quit" => {
+                app.exit(0);
+                Ok(())
+            }
+            _ => Ok(()),
+        };
+        if let Err(error) = outcome {
+            eprintln!("ScrapMap tray action failed: {error}");
+        }
+    })
+    .build(app)
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Resolves the game directory for patching.
+///
+/// Prefers the running game, because that is unambiguously the install being
+/// played, and falls back to a scan of the usual Steam library locations so the
+/// patch can be applied or reverted with the game closed -- which is when a
+/// player most often wants to, since the game only reads scripts at startup.
+fn patch_targets(state: &OverlayState) -> Result<(PathBuf, PathBuf), String> {
+    let process_id = state.game_process_id.load(Ordering::Acquire);
+    let running = (process_id != 0)
+        .then(|| game_log_directory(process_id))
+        .flatten()
+        .and_then(|logs| logs.parent().map(Path::to_path_buf));
+    let game_root = running
+        .or_else(game_patch::discover_game_root)
+        .ok_or("could not find Scrap Mechanic")?;
+    let cache_root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
+    Ok((game_root, cache_root))
+}
+
+#[tauri::command]
+fn game_patch_status(state: State<'_, OverlayState>) -> Result<game_patch::PatchStatus, String> {
+    let (game_root, cache_root) = patch_targets(&state)?;
+    Ok(game_patch::status(&game_root, &cache_root))
+}
+
+#[tauri::command]
+fn game_patch_apply(state: State<'_, OverlayState>) -> Result<game_patch::PatchStatus, String> {
+    let (game_root, cache_root) = patch_targets(&state)?;
+    game_patch::apply(&game_root, &cache_root)
+}
+
+#[tauri::command]
+fn game_patch_revert(state: State<'_, OverlayState>) -> Result<game_patch::PatchStatus, String> {
+    let (game_root, cache_root) = patch_targets(&state)?;
+    game_patch::revert(&game_root, &cache_root)
 }
 
 #[tauri::command]
@@ -1122,6 +1233,7 @@ pub fn run() {
                 .get_webview_window("main")
                 .ok_or("main overlay window is unavailable")?;
             configure_overlay_mode(&window, false)?;
+            install_tray(app.handle())?;
             start_game_window_tracker(app.handle().clone())?;
             start_diagnostic_source(app.handle().clone())?;
             Ok(())
@@ -1134,6 +1246,9 @@ pub fn run() {
             diagnostic_status,
             game_layout_snapshot,
             atlas_bake_refresh,
+            game_patch_status,
+            game_patch_apply,
+            game_patch_revert,
             poi_capture_prepare,
             server_identity_probe,
             game_build_probe,
