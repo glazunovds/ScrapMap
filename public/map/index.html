@@ -15,7 +15,7 @@
         <span class="brand-mark" aria-hidden="true">SM</span>
         <div>
           <strong>LOCAL TERRAIN MAP</strong>
-          <span id="connectionLabel" data-i18n="HEADER_CONNECTION_DEMO">demonstration data</span>
+          <span id="connectionLabel">demonstration data</span>
         </div>
       </div>
       <div class="top-actions">
@@ -66,8 +66,8 @@
 
         <div class="hover-card" id="hoverCard" hidden>
           <span id="hoverCoordinates">0 : 0</span>
-          <strong id="hoverTitle" data-i18n="MAP_HOVER_UNKNOWN">Unknown cell</strong>
-          <small id="hoverDetails" data-i18n="MAP_HOVER_NO_DATA">No data</small>
+          <strong id="hoverTitle">Unknown cell</strong>
+          <small id="hoverDetails">No data</small>
         </div>
 
         <div class="map-footer">
@@ -89,14 +89,14 @@
               type="button"
               aria-haspopup="dialog"
               aria-controls="profileDialog"
-             data-i18n="BADGE_RESOLVING">RESOLVING…</button>
+            >RESOLVING…</button>
           </div>
-          <p class="profile-summary" id="profileSummary" data-i18n="SESSION_RESOLVING_SUMMARY">Working out which map profile this is…</p>
+          <p class="profile-summary" id="profileSummary">Working out which map profile this is…</p>
           <div class="metric-grid">
             <div class="metric">
               <span data-i18n="SESSION_EXPLORED">Explored</span>
               <strong id="visitedMetric">0%</strong>
-              <small id="visitedDetail" data-i18n="SESSION_EXPLORED_DETAIL">0 of 0 cells</small>
+              <small id="visitedDetail">0 of 0 cells</small>
             </div>
             <div class="metric">
               <span data-i18n="SESSION_LOCAL_MARKERS">Local ×</span>
@@ -242,28 +242,28 @@
             <span>01</span>
             <strong>Layout</strong>
             <small data-i18n="DRAWER_LAYOUT_NOTE">grid, UUIDs, roads, POIs</small>
-            <b id="layoutFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
+            <b id="layoutFileStatus">not chosen</b>
           </label>
           <label class="file-card">
             <input id="telemetryInput" type="file" accept=".json,application/json">
             <span>02</span>
             <strong>Telemetry</strong>
             <small data-i18n="DRAWER_TELEMETRY_NOTE">player position and heading</small>
-            <b id="telemetryFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
+            <b id="telemetryFileStatus">not chosen</b>
           </label>
           <label class="file-card">
             <input id="visitedInput" type="file" accept=".json,application/json">
             <span>03</span>
             <strong>Visited</strong>
             <small data-i18n="DRAWER_VISITED_NOTE">locally revealed cells</small>
-            <b id="visitedFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
+            <b id="visitedFileStatus">not chosen</b>
           </label>
           <label class="file-card">
             <input id="markersInput" type="file" accept=".json,application/json">
             <span>04</span>
             <strong>Markers</strong>
             <small data-i18n="DRAWER_MARKERS_NOTE">imported markers</small>
-            <b id="markersFileStatus" data-i18n="DRAWER_FILE_NONE">not chosen</b>
+            <b id="markersFileStatus">not chosen</b>
           </label>
         </div>
 

@@ -6,6 +6,13 @@
  * elsewhere; a key missing from a translation falls back to English rather than
  * rendering blank, which keeps a half-finished translation usable.
  *
+ * **Only mark elements whose text is static.** Applying a dictionary rewrites
+ * every `data-i18n` element, so putting one on something the code writes at
+ * runtime overwrites the live value with the initial one -- and because the
+ * dictionary loads asynchronously it wins that race. The profile summary sat
+ * permanently on "Working out which map profile this is…" for exactly this
+ * reason. Runtime text goes through `SMText.t` at the point it is written.
+ *
  * `data-i18n` on an element replaces its text. `data-i18n-attr` takes a
  * comma-separated `attribute:KEY` list for titles, placeholders and ARIA
  * labels, which are just as visible and easier to forget.
