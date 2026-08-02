@@ -30,6 +30,23 @@ const MAX_BAKED_TILE_BYTES: u64 = 32 * 1024 * 1024;
 /// largest legitimate raster is 1024x1024. Allow one size step beyond that.
 const MAX_SPAN: usize = 2048;
 
+/// How many output pixels are drawn per sampled one.
+///
+/// The game is asked for 64 material samples per cell and that is all the
+/// terrain detail there is; upscaling invents none. What gains is everything
+/// drawn *into* the tile -- at one pixel per metre a tree is a three-pixel disc,
+/// which is where "blobby" comes from. Large tiles are capped so no image
+/// exceeds `MAX_RENDER_SPAN`.
+const RENDER_SCALE: usize = 4;
+const MAX_RENDER_SPAN: usize = 2048;
+
+fn render_scale_for(span: usize) -> usize {
+    if span == 0 {
+        return 1;
+    }
+    (MAX_RENDER_SPAN / span).clamp(1, RENDER_SCALE)
+}
+
 /// Strength of the relief shading, as a peak +/- multiplier on the base colour.
 /// Terrain colour already carries roads and biome, so this only needs to hint
 /// at slope without washing the palette out.
@@ -368,23 +385,42 @@ pub fn render_tile_rgba(
     height_span: usize,
     ground: GroundCoverLayer<'_>,
 ) -> Vec<u8> {
-    let mut rgba = vec![0_u8; span * span * 4];
+    render_tile_rgba_scaled(surface, span, color, color_span, height, height_span, ground, 1)
+}
+
+/// As `render_tile_rgba`, drawing `scale` output pixels per sampled one.
+#[allow(clippy::too_many_arguments)]
+pub fn render_tile_rgba_scaled(
+    surface: &[u8],
+    span: usize,
+    color: &[u16],
+    color_span: usize,
+    height: &[f32],
+    height_span: usize,
+    ground: GroundCoverLayer<'_>,
+    scale: usize,
+) -> Vec<u8> {
+    let scale = scale.max(1);
+    let out = span * scale;
+    let mut rgba = vec![0_u8; out * out * 4];
     let shade_available = height_span > 1 && height.len() == height_span * height_span;
     let tint_available = color_span > 0 && color.len() == color_span * color_span;
     let cover_available =
         ground.span > 0 && ground.cover.len() == ground.span * ground.span;
 
-    for row in 0..span {
-        for column in 0..span {
-            let class = usize::from(surface[row * span + column]).min(SURFACE_PALETTE.len() - 1);
+    for row in 0..out {
+        for column in 0..out {
+            let sx = column / scale;
+            let sy = row / scale;
+            let class = usize::from(surface[sy * span + sx]).min(SURFACE_PALETTE.len() - 1);
             let base = SURFACE_PALETTE[class];
 
             // The sampled colour is a tint over the material, and sits near
             // white for most terrain, so apply it as a multiplier rather than
             // as the colour itself.
             let [mut r, mut g, mut b] = if tint_available {
-                let tx = column * color_span / span;
-                let ty = row * color_span / span;
+                let tx = column * color_span / out;
+                let ty = row * color_span / out;
                 let [tr, tg, tb] = rgb565_to_rgb888(color[ty * color_span + tx]);
                 [
                     (base[0] * f32::from(tr) / 255.0) as u8,
@@ -399,8 +435,8 @@ pub fn render_tile_rgba(
             // relief passes: it distinguishes meadow from forest floor from
             // burnt stubble, all of which sample as plain grass.
             if cover_available {
-                let cx = column * ground.span / span;
-                let cy = row * ground.span / span;
+                let cx = column * ground.span / out;
+                let cy = row * ground.span / out;
                 if let Some((target, strength)) = ground.cover[cy * ground.span + cx].tint() {
                     for (index, channel) in [&mut r, &mut g, &mut b].into_iter().enumerate() {
                         let blended = f32::from(*channel) * (1.0 - strength)
@@ -412,14 +448,14 @@ pub fn render_tile_rgba(
 
             if shade_available {
                 // Map the sample onto the coarser height raster.
-                let hx = (column * height_span / span) as isize;
-                let hy = (row * height_span / span) as isize;
+                let hx = (column * height_span / out) as isize;
+                let hy = (row * height_span / out) as isize;
 
                 // Anything below the waterline is drawn as water, deepening
                 // with distance below it, and is left unshaded because a water
                 // surface is flat regardless of the bed beneath it.
                 let depth = WATER_LEVEL - sample_height(height, height_span, hx, hy);
-                if depth > 0.0 && holds_water(surface[row * span + column]) {
+                if depth > 0.0 && holds_water(surface[sy * span + sx]) {
                     let t = (depth / WATER_OPAQUE_DEPTH).clamp(0.0, 1.0);
                     let opacity = 0.55 + 0.45 * t;
                     for (index, channel) in [&mut r, &mut g, &mut b].into_iter().enumerate() {
@@ -429,8 +465,8 @@ pub fn render_tile_rgba(
                             f32::from(*channel) * (1.0 - opacity) + water * opacity;
                         *channel = blended.clamp(0.0, 255.0) as u8;
                     }
-                    let flipped = span - 1 - row;
-                    let offset = (flipped * span + column) * 4;
+                    let flipped = out - 1 - row;
+                    let offset = (flipped * out + column) * 4;
                     rgba[offset] = r;
                     rgba[offset + 1] = g;
                     rgba[offset + 2] = b;
@@ -450,8 +486,8 @@ pub fn render_tile_rgba(
                 b = (f32::from(b) * factor).clamp(0.0, 255.0) as u8;
             }
 
-            let flipped = span - 1 - row;
-            let offset = (flipped * span + column) * 4;
+            let flipped = out - 1 - row;
+            let offset = (flipped * out + column) * 4;
             rgba[offset] = r;
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;
@@ -512,7 +548,9 @@ fn convert_one(
         tile.clutter_span,
         ground_cover,
     )?;
-    let mut rgba = render_tile_rgba(
+    let scale = render_scale_for(tile.material_span);
+    let render_span = tile.material_span * scale;
+    let mut rgba = render_tile_rgba_scaled(
         &surface,
         tile.material_span,
         &color,
@@ -523,6 +561,7 @@ fn convert_one(
             cover: &clutter,
             span: if clutter.is_empty() { 0 } else { tile.clutter_span },
         },
+        scale,
     );
 
     // Trees, rocks, buildings and the crashed ship are assets rather than
@@ -536,10 +575,10 @@ fn convert_one(
             .map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()).copied())
             .collect();
         let tile_metres = (tile.size.max(1) as f32) * 64.0;
-        let pixels_per_metre = tile.material_span as f32 / tile_metres;
+        let pixels_per_metre = render_span as f32 / tile_metres;
         draw_assets(
             &mut rgba,
-            tile.material_span,
+            render_span,
             &placed,
             &palette,
             pixels_per_metre,
@@ -549,7 +588,7 @@ fn convert_one(
         );
     }
 
-    let png = encode_png(&rgba, tile.material_span)?;
+    let png = encode_png(&rgba, render_span)?;
     Ok((tile.uuid, png, tile.size))
 }
 
@@ -1291,7 +1330,9 @@ mod tests {
             assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
             // PNG stores width in bytes 16..20, big endian.
             let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
-            assert_eq!(width, size * 64, "{uuid} should be size*64 px wide");
+            // 64 samples per cell, drawn at RENDER_SCALE pixels each.
+            let expected = size * 64 * render_scale_for(size as usize * 64) as u32;
+            assert_eq!(width, expected, "{uuid} is the wrong width");
         }
 
         let manifest: Value =
