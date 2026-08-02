@@ -201,6 +201,11 @@
       document.body.dataset.gameLayout = "active";
       return true;
     } catch (error) {
+      // Swallowed here, so window.onerror never sees it. A throw inside
+      // setLayout lands after state.layout is assigned and before the world is
+      // announced, which leaves the profile unresolved and looks like nothing
+      // happened at all.
+      note("layout-failed", String(error?.stack || error?.message || error));
       document.body.dataset.gameLayout = "unavailable";
       if (typeof console.warn === "function") {
         console.warn("ScrapMap game layout is not ready", error);

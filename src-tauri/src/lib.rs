@@ -742,6 +742,12 @@ fn log_ui_event(message: String) -> Result<(), String> {
     writeln!(file, "{line}").map_err(|error| error.to_string())
 }
 
+/// The interface language the tray is using, so the panel can agree with it.
+#[tauri::command]
+fn interface_language() -> String {
+    current_language()
+}
+
 /// Remembers the interface language for the parts built before the WebView.
 #[tauri::command]
 fn set_interface_language(language: String) -> Result<(), String> {
@@ -1397,6 +1403,7 @@ pub fn run() {
             atlas_bake_refresh,
             interface_strings,
             log_ui_event,
+            interface_language,
             set_interface_language,
             game_patch_status,
             game_patch_apply,

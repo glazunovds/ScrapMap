@@ -99,7 +99,19 @@
     return loading;
   }
 
-  function preferred() {
+  async function preferred() {
+    // Under the overlay the tray owns this setting: it is where the user
+    // changes it, and it is read before a WebView exists. Asking the host keeps
+    // the menu tick and the panel from disagreeing.
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (typeof invoke === "function") {
+      try {
+        const hosted = String(await invoke("interface_language"));
+        if (LANGUAGES.some((entry) => entry.code === hosted)) return hosted;
+      } catch (_error) {
+        /* fall through to the browser's own preference */
+      }
+    }
     try {
       const stored = window.localStorage?.getItem(STORAGE_KEY);
       if (stored && LANGUAGES.some((entry) => entry.code === stored)) return stored;
@@ -137,7 +149,7 @@
   // Before anything else paints, so the panel is never briefly in the wrong
   // language. app.js reads strings through SMText.t, which falls back to the
   // markup until the dictionary lands.
-  setLanguage(preferred());
+  preferred().then(setLanguage);
   // The markup may not have parsed yet on first run.
   window.addEventListener("DOMContentLoaded", () => {
     applyTo(document);
