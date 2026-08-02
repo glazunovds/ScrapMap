@@ -21,6 +21,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
 const GENERATED_DIRECTORY: &str = "generated";
+/// Where the POI photography sweep leaves its captures. Named here as well as in
+/// `poi_capture` because the manifest merge has to know a photograph outranks
+/// the tile it would otherwise point at.
+const PHOTO_DIRECTORY: &str = "photo";
 const MAX_BAKED_TILE_BYTES: u64 = 32 * 1024 * 1024;
 /// Survival tiles run from 1x1 up to 16x16 cells, so at 64 samples per cell the
 /// largest legitimate raster is 1024x1024. Allow one size step beyond that.
@@ -585,11 +589,23 @@ fn merge_manifest(root: &Path, generated: &BTreeMap<String, Option<u32>>) -> Res
     for (uuid, size) in generated {
         let key = uuid.to_ascii_lowercase();
         let relative = format!("{GENERATED_DIRECTORY}/{key}.png");
+        // A photograph outranks the generated tile, and the photo directory is
+        // the authority on whether there is one. Deciding this here rather than
+        // preserving whatever the manifest happened to say makes the pass
+        // self-healing: it re-points tiles whose photographs an earlier version
+        // of this function stamped over.
+        let photo = format!("{PHOTO_DIRECTORY}/{key}.png");
+        let has_photo = root.join("tiles").join(&photo).exists();
+        let (top_down, kind) = if has_photo {
+            (photo.clone(), "photo")
+        } else {
+            (relative.clone(), "generated")
+        };
         match seen.get(&key) {
             Some(&index) => {
                 let entry = &mut entries[index];
-                entry["topDownRelativePath"] = json!(relative);
-                entry["topDownSourceKind"] = json!("generated");
+                entry["topDownRelativePath"] = json!(top_down);
+                entry["topDownSourceKind"] = json!(kind);
                 if let Some(size) = size {
                     entry["tileSize"] = json!(size);
                 }
@@ -611,8 +627,8 @@ fn merge_manifest(root: &Path, generated: &BTreeMap<String, Option<u32>>) -> Res
             None => entries.push(json!({
                 "tileUuid": key,
                 "relativePath": relative,
-                "topDownRelativePath": relative,
-                "topDownSourceKind": "generated",
+                "topDownRelativePath": top_down,
+                "topDownSourceKind": kind,
                 "tileSize": size.unwrap_or(1),
             })),
         }
@@ -1296,6 +1312,46 @@ mod tests {
         let again = convert_baked_atlas(&game_root, &atlas_root).unwrap();
         assert_eq!(again.converted, 0);
         assert_eq!(again.skipped, 2);
+
+        fs::remove_dir_all(&game_root).ok();
+        fs::remove_dir_all(&atlas_root).ok();
+    }
+
+    #[test]
+    fn a_photograph_survives_the_next_atlas_refresh() {
+        // The bake runs on every startup. It used to stamp `generated` over
+        // every entry, so restarting the overlay silently threw away the
+        // photographs of an entire sweep -- 115 taken, 37 still pointed at.
+        let game_root = scratch_dir("game-photo-merge");
+        let atlas_root = scratch_dir("atlas-photo-merge");
+        let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+        fs::create_dir_all(&baked_dir).unwrap();
+        fs::write(
+            baked_dir.join("dddd-4444.json"),
+            serde_json::to_vec(&baked_tile("dddd-4444", 1, 64, 32)).unwrap(),
+        )
+        .unwrap();
+
+        convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        let read = || -> Value {
+            serde_json::from_slice(&fs::read(atlas_root.join("manifest.json")).unwrap()).unwrap()
+        };
+        assert_eq!(read()["entries"][0]["topDownSourceKind"], "generated");
+
+        // A photograph appears, exactly as the sweep would leave one.
+        let photo_dir = atlas_root.join("tiles").join(PHOTO_DIRECTORY);
+        fs::create_dir_all(&photo_dir).unwrap();
+        fs::write(photo_dir.join("dddd-4444.png"), b"not really a png").unwrap();
+
+        convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        let entry = read()["entries"][0].clone();
+        assert_eq!(entry["topDownSourceKind"], "photo");
+        assert_eq!(entry["topDownRelativePath"], "photo/dddd-4444.png");
+
+        // And deleting it falls back rather than leaving a broken pointer.
+        fs::remove_file(photo_dir.join("dddd-4444.png")).unwrap();
+        convert_baked_atlas(&game_root, &atlas_root).unwrap();
+        assert_eq!(read()["entries"][0]["topDownSourceKind"], "generated");
 
         fs::remove_dir_all(&game_root).ok();
         fs::remove_dir_all(&atlas_root).ok();
