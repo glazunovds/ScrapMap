@@ -89,10 +89,12 @@ struct BakedTileFile {
     color: String,
     #[serde(default)]
     height: String,
+    /// Lua writes an empty table as `null` rather than `[]`, and serde's
+    /// `default` only covers a missing field, so this has to tolerate null.
     #[serde(default)]
-    asset_palette: Vec<String>,
+    asset_palette: Option<Vec<String>>,
     #[serde(default)]
-    assets: String,
+    assets: Option<String>,
 }
 
 /// One placed object, in tile-local metres measured from the south-west corner.
@@ -136,7 +138,24 @@ pub fn draw_assets(
     assets: &[PlacedAsset],
     palette: &[Option<AssetInfo>],
     pixels_per_metre: f32,
+    height: &[f32],
+    height_span: usize,
+    tile_metres: f32,
 ) {
+    // Lakes carry seaplants, lily pads and sprouts. They are really there, but
+    // at map scale they read as trees floating in open water, so submerged
+    // vegetation is dropped. Ruins and rocks in a lake are landmarks and stay.
+    let submerged = |x: f32, y: f32| -> bool {
+        if height_span == 0 || height.len() != height_span * height_span || tile_metres <= 0.0 {
+            return false;
+        }
+        let to_index = |value: f32| {
+            ((value / tile_metres * height_span as f32) as isize)
+                .clamp(0, height_span as isize - 1) as usize
+        };
+        height[to_index(y) * height_span + to_index(x)] < WATER_LEVEL
+    };
+
     let mut order: Vec<&PlacedAsset> = assets.iter().collect();
     order.sort_by(|a, b| {
         let radius = |item: &PlacedAsset| {
@@ -155,6 +174,11 @@ pub fn draw_assets(
             continue;
         };
         if info.kind == AssetKind::Skip {
+            continue;
+        }
+        if matches!(info.kind, AssetKind::Foliage | AssetKind::Debris)
+            && submerged(asset.x, asset.y)
+        {
             continue;
         }
         let radius = info.radius * pixels_per_metre;
@@ -427,10 +451,11 @@ fn convert_one(
 
     // Trees, rocks, buildings and the crashed ship are assets rather than
     // terrain, so nothing above sees them.
-    let placed = decode_assets(&tile.assets)?;
+    let placed = decode_assets(tile.assets.as_deref().unwrap_or_default())?;
     if !placed.is_empty() {
         let palette: Vec<Option<AssetInfo>> = tile
             .asset_palette
+            .unwrap_or_default()
             .iter()
             .map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()).copied())
             .collect();
@@ -442,6 +467,9 @@ fn convert_one(
             &placed,
             &palette,
             pixels_per_metre,
+            &height,
+            tile.height_span,
+            tile_metres,
         );
     }
 
@@ -757,7 +785,7 @@ mod tests {
             x: 16.0,
             y: 16.0,
         }];
-        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
 
         let at = |x: usize, y: usize| rgba[(y * span + x) * 4];
         assert!(at(16, 16) < 200, "the blob centre should be painted");
@@ -774,10 +802,55 @@ mod tests {
             x: 8.0,
             y: 8.0,
         }];
-        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
         assert!(
             rgba.iter().all(|&value| value == 255),
             "skipped assets must leave the terrain alone"
+        );
+    }
+
+    #[test]
+    fn submerged_vegetation_is_dropped_but_ruins_survive() {
+        let span = 16;
+        let deep = vec![-20.0_f32; span * span];
+        let placed = [PlacedAsset {
+            palette_index: 0,
+            x: 8.0,
+            y: 8.0,
+        }];
+
+        // Seaplants and lily pads sit in open water and read as floating trees.
+        let mut foliage = vec![255_u8; span * span * 4];
+        draw_assets(
+            &mut foliage,
+            span,
+            &placed,
+            &[asset_info(AssetKind::Foliage, [0, 0, 0], 4.0)],
+            1.0,
+            &deep,
+            span,
+            span as f32,
+        );
+        assert!(
+            foliage.iter().all(|&value| value == 255),
+            "submerged foliage must not be drawn"
+        );
+
+        // A ruin standing in a lake is a landmark and should still show.
+        let mut ruin = vec![255_u8; span * span * 4];
+        draw_assets(
+            &mut ruin,
+            span,
+            &placed,
+            &[asset_info(AssetKind::Building, [0, 0, 0], 4.0)],
+            1.0,
+            &deep,
+            span,
+            span as f32,
+        );
+        assert!(
+            ruin[(8 * span + 8) * 4] < 200,
+            "submerged structures should still be drawn"
         );
     }
 
@@ -792,7 +865,7 @@ mod tests {
             x: 4.0,
             y: 4.0,
         }];
-        draw_assets(&mut rgba, span, &placed, &palette, 1.0);
+        draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
         assert!(rgba.iter().all(|&value| value == 255));
     }
 
@@ -1028,6 +1101,28 @@ mod tests {
             .expect("float-valued counts must parse");
         assert_eq!(uuid, "float-tile");
         assert_eq!(size, 2);
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+
+    #[test]
+    fn a_tile_with_no_assets_still_converts() {
+        // sm.json.save writes an empty Lua table as null, not [], and serde's
+        // `default` only covers a missing field. Fourteen tiles failed on this.
+        let document = json!({
+            "uuid": "empty-assets",
+            "size": 1.0,
+            "materialSpan": 2.0,
+            "colorSpan": 0.0,
+            "heightSpan": 0.0,
+            "material": "0123",
+            "color": "",
+            "height": "",
+            "assetPalette": Value::Null,
+            "assets": "",
+        });
+        let (uuid, png, _) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new())
+            .expect("a null asset palette must not fail the tile");
+        assert_eq!(uuid, "empty-assets");
         assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
