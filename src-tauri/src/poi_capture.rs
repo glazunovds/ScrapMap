@@ -40,6 +40,14 @@ const MIN_DETAIL: f32 = 6.0;
 /// Floor on the fraction of the frame a shot may keep. A malformed or absurd
 /// `covered` must not reduce the capture to a handful of pixels.
 const MIN_CROP: f32 = 0.2;
+/// How the photographs are framed and cropped. **Raise this whenever a change
+/// would make an existing photograph wrong**, and every tile is retaken once.
+///
+/// Keyed on this rather than on file timestamps: a completed sweep clears its
+/// request and re-applying the patch touches the Lua, so neither is a usable
+/// signal for "this photograph was taken by the current code".
+const CAPTURE_GENERATION: u32 = 1;
+const STATE_FILE: &str = "photo-state.json";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,25 +167,35 @@ pub fn build_targets(
 /// each photograph against the request it was taken for turns a second run into
 /// a resumption -- and leaves a completed sweep alone, because by then the
 /// request is gone and every target is offered afresh.
-pub fn remaining_targets(
-    game_root: &Path,
-    atlas_root: &Path,
-    targets: Vec<CaptureTarget>,
-) -> Vec<CaptureTarget> {
-    let request = game_root.join("Survival").join(REQUEST_FILE);
-    let Some(requested_at) = fs::metadata(&request).and_then(|data| data.modified()).ok() else {
-        return targets;
-    };
+pub fn remaining_targets(atlas_root: &Path, targets: Vec<CaptureTarget>) -> Vec<CaptureTarget> {
+    let done = photo_state(atlas_root);
     let directory = atlas_root.join("tiles").join(PHOTO_DIRECTORY);
     targets
         .into_iter()
         .filter(|target| {
-            let photo = directory.join(format!("{}.png", target.uuid.to_ascii_lowercase()));
-            !fs::metadata(&photo)
-                .and_then(|data| data.modified())
-                .is_ok_and(|taken| taken >= requested_at)
+            let key = target.uuid.to_ascii_lowercase();
+            // The record and the file have to agree: a photograph deleted from
+            // the cache must be retaken even if the state file remembers it.
+            let current = done.get(&key).copied() == Some(CAPTURE_GENERATION);
+            !(current && directory.join(format!("{key}.png")).exists())
         })
         .collect()
+}
+
+fn photo_state(atlas_root: &Path) -> BTreeMap<String, u32> {
+    fs::read(atlas_root.join(STATE_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Records that a tile now has a photograph taken by the current generation.
+pub fn note_capture(atlas_root: &Path, uuid: &str) {
+    let mut state = photo_state(atlas_root);
+    state.insert(uuid.to_ascii_lowercase(), CAPTURE_GENERATION);
+    if let Ok(bytes) = serde_json::to_vec_pretty(&state) {
+        let _ = fs::write(atlas_root.join(STATE_FILE), bytes);
+    }
 }
 
 /// Leaves the sweep request where Lua will find it on the next world load.

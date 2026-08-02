@@ -124,6 +124,40 @@ The camera now also holds the final framing position during travel and settle
 rather than hovering at 440 m, so the live view is the tile streaming in rather
 than four seconds of sky per cycle.
 
+## Resuming, and why it offered the whole map again
+
+The first resume keyed on the request file's timestamp, which does not survive
+contact with reality: a completed sweep clears its request, and re-applying the
+patch touches the Lua. Either makes every photograph look stale.
+
+It now keys on `CAPTURE_GENERATION`, recorded per tile in
+`%LOCALAPPDATA%\ScrapMap\photo-state.json`. A tile is skipped only when its
+recorded generation matches the current one *and* the file is still on disk.
+**Raise the constant whenever a change would make an existing photograph
+wrong**, and every tile is retaken once.
+
+Every photograph taken before this exists predates the state file, so the next
+sweep is a full 116 by design. After that, resuming should offer only what is
+genuinely missing.
+
+## The death, still not explained
+
+Three runs have now ended with the player dead. The fall watchdog works -- one
+`rescue` fired on the 8-cell tile, and clearance reads 295.8 -- but a death still
+followed nineteen targets in, with no new death marker in the log and no landing
+in the height trace.
+
+Rather than guess a fourth time, the sweep now logs the local player's stats with
+every shot, as a trailing `hp=… food=… water=…` field on the `ready` line. It is
+read from `SurvivalPlayer.client_onClientDataUpdate`, wrapped lazily from the
+update because that file may load after this one.
+
+Leading hypothesis, and the reason for logging food and water rather than only
+health: a sweep is fifteen minutes with the controls locked and no way to eat or
+drink, and several have now been run back to back. If the next `ready` lines show
+food or water trending to zero, that is the answer, and the fix is to shorten the
+sweep or to eat first — not to touch health, which the project rules out.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** The fix is to rotate the captured

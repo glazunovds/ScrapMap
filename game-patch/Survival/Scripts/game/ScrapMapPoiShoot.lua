@@ -113,6 +113,37 @@ local ARRIVE_RADIUS = 12
 local CELL = 64
 
 local g_shoot = nil
+-- Last stats the server sent the local player, captured so a death during a
+-- sweep can be explained rather than guessed at. Two runs ended with the player
+-- dead and no way to tell whether it was the fall, a robot, or simply fifteen
+-- minutes with the controls locked and no chance to eat.
+local g_stats = nil
+
+-- SurvivalPlayer lives in its own file and may not exist when this one loads,
+-- so the wrap is attempted from the update rather than at load time.
+local function installStatProbe()
+	if g_scrapMapStatProbeInstalled or SurvivalPlayer == nil
+		or SurvivalPlayer.client_onClientDataUpdate == nil then
+		return
+	end
+	local original = SurvivalPlayer.client_onClientDataUpdate
+	function SurvivalPlayer.client_onClientDataUpdate( self, data )
+		original( self, data )
+		if type( data ) == "table" and type( data.stats ) == "table"
+			and sm.localPlayer.getPlayer() == self.player then
+			g_stats = data.stats
+		end
+	end
+	g_scrapMapStatProbeInstalled = true
+end
+
+local function statsText()
+	if type( g_stats ) ~= "table" then
+		return "?"
+	end
+	return string.format( "hp=%s food=%s water=%s",
+		tostring( g_stats.hp ), tostring( g_stats.food ), tostring( g_stats.water ) )
+end
 
 -- Height at which a tile of `metres` across exactly fills the frame vertically.
 -- The captured square is the centre of the client area, so its side covers the
@@ -377,10 +408,10 @@ local function shootUpdate( game, dt )
 		-- clearance tells a photograph with a character in it apart from one
 		-- that was simply framed wrong, and structure explains the pull-back.
 		sm.log.info( string.format(
-			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.2f|%.1f|%s|%.1f|%.1f",
+			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.2f|%.1f|%s|%.1f|%.1f|%s",
 			tostring( target.uuid ), target.x, target.y, target.size or 1, metres,
 			covered, height, tostring( g_shoot.probed ), clearance,
-			g_shoot.structure or 0 ) )
+			g_shoot.structure or 0, statsText() ) )
 		return
 	end
 
@@ -423,6 +454,7 @@ if not g_scrapMapShootInstalled then
 
 		-- The request is read once, on the first client frame: by then the world
 		-- exists, and re-reading it every frame would be pointless work.
+		installStatProbe()
 		if not self.cl.scrapMapShootChecked then
 			self.cl.scrapMapShootChecked = true
 			shootLoad()

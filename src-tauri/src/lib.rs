@@ -456,7 +456,7 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
     }
     // An interrupted sweep resumes rather than starting over.
     let total = all.len();
-    let targets = poi_capture::remaining_targets(game_root, &cache_root, all);
+    let targets = poi_capture::remaining_targets(&cache_root, all);
     if targets.is_empty() {
         return Err("every point of interest in this world is already photographed".to_owned());
     }
@@ -890,6 +890,7 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                                         // a sweep that is interrupted should
                                         // still leave behind what it captured.
                                         if let Some(root) = atlas_bake::atlas_root() {
+                                            poi_capture::note_capture(&root, &uuid);
                                             if let Err(error) = poi_capture::publish_photos(
                                                 &root,
                                                 std::slice::from_ref(&uuid),
