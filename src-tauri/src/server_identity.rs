@@ -26,6 +26,7 @@ const MAX_PID_SCAN_LINES: usize = 64;
 const LOG_FILE_PREFIX: &str = "game-";
 const LOG_FILE_SUFFIX: &str = ".log";
 const NETWORK_CONNECT_MARKER: &str = "[Network] Connecting to ";
+/// The game tags each line with its main *thread* id, not its process id.
 const MAIN_THREAD_MARKER: &str = "[Main:";
 const STABLE_ID_PREFIX: &str = "steam-sha256:";
 const STABLE_ID_DOMAIN_SALT: &[u8] = b"scrapmap-peer-host-v1\0";
@@ -340,7 +341,7 @@ fn probe_log_file(path: &Path, expected_pid: u32) -> ServerIdentityProbe {
         let line = line.strip_suffix('\r').unwrap_or(line);
         if header_id.is_none() && header_lines < MAX_PID_SCAN_LINES {
             header_lines += 1;
-            header_id = process_id_from_line(line);
+            header_id = main_thread_id_from_line(line);
         }
         if let Some(target) = connection_target(line) {
             latest = Some((target, line_index, byte_offset));
@@ -350,7 +351,7 @@ fn probe_log_file(path: &Path, expected_pid: u32) -> ServerIdentityProbe {
     }
 
     match header_id {
-        Some(pid) if pid == expected_pid => {}
+        Some(id) if id == expected_pid || thread_belongs_to_process(id, expected_pid) => {}
         Some(_) => return ServerIdentityProbe::unknown(ServerIdentityIssue::ProcessIdMismatch),
         None => return ServerIdentityProbe::unknown(ServerIdentityIssue::MissingProcessId),
     }
@@ -374,13 +375,66 @@ fn probe_log_file(path: &Path, expected_pid: u32) -> ServerIdentityProbe {
     }
 }
 
-fn process_id_from_header(text: &str) -> Option<u32> {
-    text.lines()
-        .take(MAX_PID_SCAN_LINES)
-        .find_map(process_id_from_line)
+
+/// Whether `thread_id` is one of `process_id`'s threads.
+///
+/// The game logs `[Main:<id>]`, and that id is its **main thread**, not its
+/// process -- confirmed against a live game: PID 13880 logging `[Main:71964]`,
+/// which is exactly what Windows reports as its first thread. Comparing the two
+/// directly can therefore never match, which is why a world never acquired an
+/// identity on its own and the profile sat quarantined.
+///
+/// Checking thread ownership keeps what the comparison was for -- proving the
+/// log belongs to the process being tracked -- instead of weakening it to
+/// "newest log wins".
+#[cfg(target_os = "windows")]
+fn thread_belongs_to_process(thread_id: u32, process_id: u32) -> bool {
+    use windows::Win32::{
+        Foundation::CloseHandle,
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+        },
+    };
+
+    if thread_id == 0 || process_id == 0 {
+        return false;
+    }
+    // SAFETY: a thread snapshot takes no input buffer, and the handle is closed
+    // on every path out of this function.
+    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }) else {
+        return false;
+    };
+
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut owned = false;
+    // SAFETY: `entry` is a correctly sized THREADENTRY32 for both calls.
+    if unsafe { Thread32First(snapshot, &mut entry) }.is_ok() {
+        loop {
+            if entry.th32ThreadID == thread_id && entry.th32OwnerProcessID == process_id {
+                owned = true;
+                break;
+            }
+            if unsafe { Thread32Next(snapshot, &mut entry) }.is_err() {
+                break;
+            }
+        }
+    }
+    // SAFETY: `snapshot` came from CreateToolhelp32Snapshot and is still open.
+    unsafe {
+        let _ = CloseHandle(snapshot);
+    }
+    owned
 }
 
-fn process_id_from_line(line: &str) -> Option<u32> {
+#[cfg(not(target_os = "windows"))]
+fn thread_belongs_to_process(_thread_id: u32, _process_id: u32) -> bool {
+    false
+}
+
+fn main_thread_id_from_line(line: &str) -> Option<u32> {
     let marker_start = line.find(MAIN_THREAD_MARKER)? + MAIN_THREAD_MARKER.len();
     let suffix = &line[marker_start..];
     let marker_end = suffix.find(']')?;
