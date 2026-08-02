@@ -10,7 +10,20 @@ tile atlas covering all 493 tiles with terrain, ground cover, water, hillshading
 buildings and forest, and real photographs of every point of interest taken with
 the game's own camera.
 
-Not working: shared fog and markers.
+Not working: fog and markers do not persist between players.
+
+Live positions and names for every player in a session already work and need
+no backend -- the game tells each client where everyone is, and fog reveals
+around all of them. What is missing is persistence *between* players: markers
+one of you placed while the other was offline. The requirement is settled:
+syncing only while both are online is acceptable, provided each machine keeps
+its own fog and markers between sessions, which it already does.
+
+That makes the remaining feature much smaller than `SYNC.md` assumes. Passing
+markers through the game's own network rather than through Cloudflare is worth
+trying first: no account, no service, no listening port. The uncertain part is
+getting a marker *into* a running game, since `sm.json.fileExists` cannot see
+files written during the session -- a twenty-minute experiment, not a design.
 
 The tile atlas renders at four pixels per sampled metre, and buildings, wrecks
 and rock formations are drawn from their own collision-mesh footprints rather
@@ -74,14 +87,23 @@ and it needs no game running to do it.
 
 ## Next
 
-### Shared fog and markers
+### Shared markers
 
-`SYNC.md` has the design. Nothing is implemented.
+`SYNC.md` has a Cloudflare design that now looks heavier than the problem
+needs; see above. Nothing is implemented either way.
 
 ### Navigation
 
 Markers exist. Target bearing, breadcrumbs, route drawing, A* and breadcrumb
 simplification remain.
+
+### Release
+
+The executable carries the game patch and a tray icon, so a released build
+needs neither Node nor a checkout. What remains before publishing: screenshots
+of the English interface, and a look at whether the panel still offers things
+that no longer earn their place -- the photography button most of all, now that
+eleven photographs are kept out of a hundred and sixteen taken.
 
 ### Housekeeping
 

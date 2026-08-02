@@ -32,6 +32,7 @@ tray follows the panel one restart later.
 | `src/` | A TypeScript domain layer used only by tests; see `public/map/CLAUDE.md` |
 | `game-patch/` | Lua installed into the game; canonical copies live here |
 | `tools/` | `game-patch.mjs` (install/revert), repository hygiene check |
+| `public/map/locales/` | Interface strings; English is the default and fallback |
 | `docs/` | Architecture, game integration, sync design, roadmap |
 
 ## Commands
@@ -107,6 +108,17 @@ image, which is a perfectly good outcome.
 
 **`sm.render.setCinematic( true )` draws letterbox bars.** It cost the top and
 bottom tenth of all 116 POI photographs. `sm.gui.hideGui` is what hides the HUD.
+
+**Applying a dictionary rewrites every `data-i18n` element.** Marking something
+the code writes at runtime replaces the live value with the initial one, and the
+dictionary loads asynchronously so it wins that race. The profile summary sat
+permanently on its placeholder for exactly this reason. Runtime text goes
+through `SMText.t` where it is written, never through markup.
+
+**The panel has no console in a release build.** It reports to
+`%LOCALAPPDATA%\ScrapMap\ui.log`: uncaught errors with a file and line, and the
+profile state machine's decisions. Two wrong diagnoses were spent guessing at a
+stuck profile before this existed; the log named the cause on the first run.
 
 **`BitBlt` returns pure black on the game window** because it is
 DirectX-presented. `PrintWindow` with `PW_RENDERFULLCONTENT` returns a real
