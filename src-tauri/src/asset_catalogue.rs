@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const CATALOGUE_FILE: &str = "asset-catalogue.json";
-const CATALOGUE_VERSION: u32 = 1;
+const CATALOGUE_VERSION: u32 = 2;
 /// Collision meshes are metres; nothing legitimate is wider than a tile.
 const MAX_RADIUS: f32 = 64.0;
 
@@ -230,8 +230,116 @@ fn asset_set_directories(game_root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn harvestable_set_directories(game_root: &Path) -> Vec<PathBuf> {
+    ["Survival", "Data"]
+        .into_iter()
+        .map(|part| {
+            game_root
+                .join(part)
+                .join("Harvestables")
+                .join("Database")
+                .join("HarvestableSets")
+        })
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// Harvestable sets carry no collision mesh, so size comes from the name. A
+/// forest is mostly full-grown trees, and the map only needs them to read as
+/// canopy rather than to be individually measurable.
+fn harvestable_radius(kind: AssetKind, name: &str) -> f32 {
+    let item = name.to_ascii_lowercase();
+    if item.contains("sapling") || item.contains("small") || item.contains("young") {
+        return 1.4;
+    }
+    if item.contains("large") || item.contains("big") {
+        return 4.0;
+    }
+    match kind {
+        AssetKind::Foliage => 2.6,
+        AssetKind::Rock => 1.8,
+        _ => kind.default_radius(),
+    }
+}
+
+/// Harvestables are the ordinary forest and boulders: trees, stones, ore.
+/// Their sets are named plainly, so the file name classifies them.
+fn classify_harvestable(set_name: &str, name: &str) -> AssetKind {
+    let set = set_name.to_ascii_lowercase();
+    let item = name.to_ascii_lowercase();
+    if set.contains("tree") || set.contains("forest") || set.contains("farm")
+        || set.contains("plantable") || set.contains("potato") || item.contains("tree")
+    {
+        return AssetKind::Foliage;
+    }
+    if set.contains("stone") || set.contains("ore") || set.contains("crystal")
+        || set.contains("mineral") || set.contains("amber") || set.contains("sparkstone")
+    {
+        return AssetKind::Rock;
+    }
+    if set.contains("dungeon") || set.contains("station") {
+        return AssetKind::Building;
+    }
+    // Loot crates, fences, traps and remains: small scatter, drawn faintly.
+    AssetKind::Debris
+}
+
+/// The first entry of a harvestable's colour list stands in for the whole
+/// object; the rest are per-instance variants of the same foliage.
+fn harvestable_color(value: &Value) -> Option<[u8; 3]> {
+    match value {
+        Value::Array(items) => items.iter().filter_map(Value::as_str).find_map(parse_hex_color),
+        Value::String(text) => parse_hex_color(text),
+        _ => None,
+    }
+}
+
 fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
     let mut catalogue = HashMap::new();
+
+    for directory in harvestable_set_directories(game_root) {
+        let Ok(listing) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in listing.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("harvestableset") {
+                continue;
+            }
+            let set_name = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let Ok(bytes) = fs::read(&path) else { continue };
+            let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
+                continue;
+            };
+            let Some(items) = document.get("harvestableList").and_then(Value::as_array) else {
+                continue;
+            };
+
+            for item in items {
+                let Some(uuid) = item.get("uuid").and_then(Value::as_str) else {
+                    continue;
+                };
+                let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
+                let kind = classify_harvestable(&set_name, name);
+                let color = item
+                    .get("color")
+                    .and_then(harvestable_color)
+                    .unwrap_or_else(|| kind.default_color());
+                catalogue.insert(
+                    uuid.to_ascii_lowercase(),
+                    AssetInfo {
+                        kind,
+                        color,
+                        radius: harvestable_radius(kind, name),
+                    },
+                );
+            }
+        }
+    }
 
     for directory in asset_set_directories(game_root) {
         let Ok(listing) = fs::read_dir(&directory) else {
@@ -387,6 +495,50 @@ mod tests {
         let radius = radius_from_obj(&path).unwrap();
         assert!((radius - 0.5).abs() < 0.001, "got {radius}");
         fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn harvestable_sets_classify_from_their_file_name() {
+        // Ordinary forest is harvestables, not assets: Forest.assetset holds
+        // only giant-tree parts.
+        assert_eq!(
+            classify_harvestable("trees", "harvestable_tree_leafy01"),
+            AssetKind::Foliage
+        );
+        assert_eq!(
+            classify_harvestable("burntforest", "harvestable_tree_burnt02"),
+            AssetKind::Foliage
+        );
+        assert_eq!(
+            classify_harvestable("stones", "harvestable_stone_large01"),
+            AssetKind::Rock
+        );
+        assert_eq!(classify_harvestable("ore", "harvestable_ore_iron"), AssetKind::Rock);
+        assert_eq!(
+            classify_harvestable("loot", "harvestable_crate01"),
+            AssetKind::Debris
+        );
+    }
+
+    #[test]
+    fn harvestable_colour_takes_the_first_of_the_variant_list() {
+        // The shipped form is a list of RGBA variants for the same plant.
+        let colors = serde_json::json!(["54c51eff", "68cf37ff", "9ebe2bff"]);
+        assert_eq!(harvestable_color(&colors), Some([0x54, 0xC5, 0x1E]));
+        assert_eq!(
+            harvestable_color(&serde_json::json!("db9819ff")),
+            Some([0xDB, 0x98, 0x19])
+        );
+        assert_eq!(harvestable_color(&serde_json::json!(7)), None);
+    }
+
+    #[test]
+    fn saplings_are_drawn_smaller_than_grown_trees() {
+        let sapling = harvestable_radius(AssetKind::Foliage, "harvestable_tree_sapling01");
+        let grown = harvestable_radius(AssetKind::Foliage, "harvestable_tree_leafy01");
+        let large = harvestable_radius(AssetKind::Foliage, "harvestable_tree_large01");
+        assert!(sapling < grown, "{sapling} !< {grown}");
+        assert!(grown < large, "{grown} !< {large}");
     }
 
     #[test]

@@ -21,7 +21,7 @@
 -- twenty seconds on the first world load and nothing afterwards. Lower it to
 -- spread the work across several loads instead.
 
-SCRAPMAP_ATLAS_VERSION = 3
+SCRAPMAP_ATLAS_VERSION = 4
 
 -- Samples per cell edge. Material drives the picture, so it gets one sample per
 -- metre, keeping 8 m roads about 8 px wide. Tint and height vary smoothly and
@@ -146,27 +146,38 @@ local function sampleTile( uid, size )
 		end
 	end
 
-	-- Assets are per cell rather than per sample, so this is one call per cell.
+	-- Objects are per cell rather than per sample, so this is a couple of calls
+	-- per cell. Assets are the set pieces -- buildings, giant trees, the crashed
+	-- ship -- while ordinary forest and boulders are harvestables. Both are just
+	-- a uuid and a position, so they share one palette and stream and are told
+	-- apart by uuid on the other side.
 	local palette, paletteIndex, assetParts = {}, {}, {}
+
+	local function collect( objects, offsetX, offsetY )
+		if type( objects ) ~= "table" then return end
+		for _, object in ipairs( objects ) do
+			local key = tostring( object.uuid )
+			local index = paletteIndex[key]
+			if index == nil then
+				palette[#palette + 1] = key
+				index = #palette - 1
+				paletteIndex[key] = index
+			end
+			assetParts[#assetParts + 1] = encodeAsset(
+				index,
+				offsetX * CELL + object.pos.x,
+				offsetY * CELL + object.pos.y
+			)
+		end
+	end
+
 	for offsetY = 0, size - 1 do
 		for offsetX = 0, size - 1 do
 			local ok, assets = pcall( sm.terrainTile.getAssetsForCell, uid, offsetX, offsetY, 0 )
-			if ok and type( assets ) == "table" then
-				for _, asset in ipairs( assets ) do
-					local key = tostring( asset.uuid )
-					local index = paletteIndex[key]
-					if index == nil then
-						palette[#palette + 1] = key
-						index = #palette - 1
-						paletteIndex[key] = index
-					end
-					assetParts[#assetParts + 1] = encodeAsset(
-						index,
-						offsetX * CELL + asset.pos.x,
-						offsetY * CELL + asset.pos.y
-					)
-				end
-			end
+			if ok then collect( assets, offsetX, offsetY ) end
+			local grown, harvestables =
+				pcall( sm.terrainTile.getHarvestablesForCell, uid, offsetX, offsetY, 0 )
+			if grown then collect( harvestables, offsetX, offsetY ) end
 		end
 	end
 
