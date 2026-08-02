@@ -193,6 +193,46 @@ fn overlay_identity(_window: &WebviewWindow) -> Option<WindowIdentity> {
     None
 }
 
+/// Stops the overlay ever taking activation from the game.
+///
+/// Scrap Mechanic captures the cursor while it has focus and releases it the
+/// instant it loses focus, and it will not take it back without a click. So an
+/// overlay that activates itself -- which showing a window on Windows can do --
+/// leaves the player with a loose cursor after every alt-tab, needing a couple
+/// of clicks to get it back.
+///
+/// `WS_EX_NOACTIVATE` is the guarantee rather than an ordering trick: the window
+/// still receives clicks, it simply never becomes the foreground window. It is
+/// cleared for the full map, which is a window the player is meant to type and
+/// click in.
+#[cfg(target_os = "windows")]
+fn set_overlay_activates(window: &WebviewWindow, activates: bool) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
+        },
+    };
+
+    let handle = window.hwnd().map_err(|error| error.to_string())?;
+    let hwnd = HWND(handle.0 as *mut _);
+    // SAFETY: `hwnd` is this process's own window, still alive for this call.
+    unsafe {
+        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let flag = WS_EX_NOACTIVATE.0 as isize;
+        let wanted = if activates { current & !flag } else { current | flag };
+        if wanted != current {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_overlay_activates(_window: &WebviewWindow, _activates: bool) -> Result<(), String> {
+    Ok(())
+}
+
 fn game_status(poll: &GameWindowPoll, overlay: Option<WindowIdentity>) -> GameWindowStatusEvent {
     let Some(game) = poll.game.as_ref() else {
         return GameWindowStatusEvent {
@@ -247,6 +287,7 @@ fn notify_frontend(window: &WebviewWindow, expanded: bool) -> Result<(), String>
 }
 
 fn configure_overlay_mode(window: &WebviewWindow, expanded: bool) -> Result<(), String> {
+    set_overlay_activates(window, expanded)?;
     window
         .set_focusable(expanded)
         .map_err(|error| error.to_string())?;

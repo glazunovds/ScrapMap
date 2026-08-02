@@ -21,6 +21,7 @@
         "minWidth": 320,
         "minHeight": 320,
         "decorations": false,
+        "focus": false,
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
