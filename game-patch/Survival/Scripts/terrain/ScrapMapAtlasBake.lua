@@ -21,7 +21,7 @@
 -- twenty seconds on the first world load and nothing afterwards. Lower it to
 -- spread the work across several loads instead.
 
-SCRAPMAP_ATLAS_VERSION = 4
+SCRAPMAP_ATLAS_VERSION = 5
 
 -- Samples per cell edge. Material drives the picture, so it gets one sample per
 -- metre, keeping 8 m roads about 8 px wide. Tint and height vary smoothly and
@@ -29,6 +29,10 @@ SCRAPMAP_ATLAS_VERSION = 4
 SCRAPMAP_ATLAS_MATERIAL_RES = 64
 SCRAPMAP_ATLAS_COLOR_RES = 32
 SCRAPMAP_ATLAS_HEIGHT_RES = 32
+-- Ground cover: grass tufts, burnt stubble, pebbles. The material sampler only
+-- reports the surface type, so without this a meadow and a forest floor are the
+-- same flat green.
+SCRAPMAP_ATLAS_CLUTTER_RES = 32
 
 -- Budget is counted in cells, not tiles, because tiles range from 1x1 to 16x16
 -- and a tile count would make the cost per load wildly uneven.
@@ -49,8 +53,9 @@ local SURFACE_THRESHOLD = 0.25
 
 -- Changing how tiles are sampled invalidates everything baked so far.
 local function bakeSignature()
-	return string.format( "v%d-m%d-c%d-h%d", SCRAPMAP_ATLAS_VERSION,
-		SCRAPMAP_ATLAS_MATERIAL_RES, SCRAPMAP_ATLAS_COLOR_RES, SCRAPMAP_ATLAS_HEIGHT_RES )
+	return string.format( "v%d-m%d-c%d-h%d-k%d", SCRAPMAP_ATLAS_VERSION,
+		SCRAPMAP_ATLAS_MATERIAL_RES, SCRAPMAP_ATLAS_COLOR_RES, SCRAPMAP_ATLAS_HEIGHT_RES,
+		SCRAPMAP_ATLAS_CLUTTER_RES )
 end
 
 local function classifySurface( m0, m1, m2, m3, m4, m5, m6, m7 )
@@ -132,6 +137,25 @@ local function sampleTile( uid, size )
 		end
 	end
 
+	-- Clutter is addressed in half-metres, not metres: the game passes
+	-- CELL_SIZE * 2 - 1 as the wrap limit.
+	local clutterSpan = size * SCRAPMAP_ATLAS_CLUTTER_RES
+	local clutterParts = {}
+	step = ( CELL * 2 ) / SCRAPMAP_ATLAS_CLUTTER_RES
+	for row = 0, clutterSpan - 1 do
+		local offsetY = math.floor( row / SCRAPMAP_ATLAS_CLUTTER_RES )
+		local ry = ( row % SCRAPMAP_ATLAS_CLUTTER_RES + 0.5 ) * step
+		for column = 0, clutterSpan - 1 do
+			local offsetX = math.floor( column / SCRAPMAP_ATLAS_CLUTTER_RES )
+			local rx = ( column % SCRAPMAP_ATLAS_CLUTTER_RES + 0.5 ) * step
+			local ok, index = pcall( sm.terrainTile.getClutterIdxAt, uid, offsetX, offsetY, rx, ry )
+			if not ok or type( index ) ~= "number" or index < 0 or index > 254 then
+				index = 255
+			end
+			clutterParts[#clutterParts + 1] = string.format( "%02X", index )
+		end
+	end
+
 	step = CELL / SCRAPMAP_ATLAS_HEIGHT_RES
 	for row = 0, heightSpan - 1 do
 		local offsetY = math.floor( row / SCRAPMAP_ATLAS_HEIGHT_RES )
@@ -183,6 +207,8 @@ local function sampleTile( uid, size )
 
 	return {
 		materialSpan = materialSpan,
+		clutterSpan = clutterSpan,
+		clutter = table.concat( clutterParts ),
 		colorSpan = colorSpan,
 		heightSpan = heightSpan,
 		material = table.concat( materialParts ),
@@ -265,6 +291,10 @@ function ScrapMapBakeAtlas()
 						poiType = entry.info.poiType,
 						cellSize = CELL,
 						materialSpan = result.materialSpan,
+						clutterSpan = result.clutterSpan,
+						clutterResolution = SCRAPMAP_ATLAS_CLUTTER_RES,
+						clutterEncoding = "clutter-index-hex",
+						clutter = result.clutter,
 						colorSpan = result.colorSpan,
 						heightSpan = result.heightSpan,
 						minHeight = result.minHeight,

@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::asset_catalogue::{self, AssetInfo, AssetKind};
+use crate::asset_catalogue::{self, AssetInfo, AssetKind, GroundCover};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
@@ -89,12 +89,50 @@ struct BakedTileFile {
     color: String,
     #[serde(default)]
     height: String,
+    #[serde(default, deserialize_with = "lua_span")]
+    clutter_span: usize,
+    #[serde(default)]
+    clutter: Option<String>,
     /// Lua writes an empty table as `null` rather than `[]`, and serde's
     /// `default` only covers a missing field, so this has to tolerate null.
     #[serde(default)]
     asset_palette: Option<Vec<String>>,
     #[serde(default)]
     assets: Option<String>,
+}
+
+/// Decodes the clutter raster: one two-digit index per sample into the game's
+/// clutter list, with 0xFF meaning "nothing here".
+fn decode_clutter(
+    text: &str,
+    span: usize,
+    table: &[GroundCover],
+) -> Result<Vec<GroundCover>, String> {
+    if text.is_empty() || span == 0 {
+        return Ok(Vec::new());
+    }
+    if span > MAX_SPAN {
+        return Err(format!("implausible clutter span {span}"));
+    }
+    let expected = span * span;
+    if text.len() != expected * 2 {
+        return Err(format!(
+            "clutter raster expected {} characters, found {}",
+            expected * 2,
+            text.len()
+        ));
+    }
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|chunk| {
+            let slice = std::str::from_utf8(chunk).map_err(|_| "clutter is not ASCII")?;
+            let index = usize::from_str_radix(slice, 16)
+                .map_err(|_| "clutter contains a non-hex character".to_owned())?;
+            // Unknown indices fall back to bare ground rather than inventing a
+            // tint, so a clutter list we do not recognise simply does nothing.
+            Ok(table.get(index).copied().unwrap_or(GroundCover::Bare))
+        })
+        .collect()
 }
 
 /// One placed object, in tile-local metres measured from the south-west corner.
@@ -311,6 +349,12 @@ fn sample_height(height: &[f32], span: usize, x: isize, y: isize) -> f32 {
 ///
 /// Row 0 of the baked raster is the tile's south edge, but image rows run top
 /// down, so rows are emitted in reverse to put north at the top.
+#[derive(Clone, Copy, Default)]
+pub struct GroundCoverLayer<'a> {
+    pub cover: &'a [GroundCover],
+    pub span: usize,
+}
+
 pub fn render_tile_rgba(
     surface: &[u8],
     span: usize,
@@ -318,10 +362,13 @@ pub fn render_tile_rgba(
     color_span: usize,
     height: &[f32],
     height_span: usize,
+    ground: GroundCoverLayer<'_>,
 ) -> Vec<u8> {
     let mut rgba = vec![0_u8; span * span * 4];
     let shade_available = height_span > 1 && height.len() == height_span * height_span;
     let tint_available = color_span > 0 && color.len() == color_span * color_span;
+    let cover_available =
+        ground.span > 0 && ground.cover.len() == ground.span * ground.span;
 
     for row in 0..span {
         for column in 0..span {
@@ -343,6 +390,21 @@ pub fn render_tile_rgba(
             } else {
                 [base[0] as u8, base[1] as u8, base[2] as u8]
             };
+
+            // Ground cover sits between the surface material and the water and
+            // relief passes: it distinguishes meadow from forest floor from
+            // burnt stubble, all of which sample as plain grass.
+            if cover_available {
+                let cx = column * ground.span / span;
+                let cy = row * ground.span / span;
+                if let Some((target, strength)) = ground.cover[cy * ground.span + cx].tint() {
+                    for (index, channel) in [&mut r, &mut g, &mut b].into_iter().enumerate() {
+                        let blended = f32::from(*channel) * (1.0 - strength)
+                            + target[index] * strength;
+                        *channel = blended.clamp(0.0, 255.0) as u8;
+                    }
+                }
+            }
 
             if shade_available {
                 // Map the sample onto the coarser height raster.
@@ -415,6 +477,7 @@ fn encode_png(rgba: &[u8], span: usize) -> Result<Vec<u8>, String> {
 fn convert_one(
     bytes: &[u8],
     catalogue: &HashMap<String, AssetInfo>,
+    ground_cover: &[GroundCover],
 ) -> Result<(String, Vec<u8>, u32), String> {
     let tile: BakedTileFile =
         serde_json::from_slice(bytes).map_err(|error| format!("parse: {error}"))?;
@@ -440,6 +503,11 @@ fn convert_one(
             .collect()
     };
 
+    let clutter = decode_clutter(
+        tile.clutter.as_deref().unwrap_or_default(),
+        tile.clutter_span,
+        ground_cover,
+    )?;
     let mut rgba = render_tile_rgba(
         &surface,
         tile.material_span,
@@ -447,6 +515,10 @@ fn convert_one(
         tile.color_span,
         &height,
         tile.height_span,
+        GroundCoverLayer {
+            cover: &clutter,
+            span: if clutter.is_empty() { 0 } else { tile.clutter_span },
+        },
     );
 
     // Trees, rocks, buildings and the crashed ship are assets rather than
@@ -576,6 +648,7 @@ pub fn convert_baked_atlas(game_root: &Path, root: &Path) -> Result<AtlasBakeRep
     };
 
     let catalogue = asset_catalogue::load(game_root, root);
+    let ground_cover = asset_catalogue::load_ground_cover(game_root);
 
     let mut report = AtlasBakeReportV1 {
         converted: 0,
@@ -623,7 +696,7 @@ pub fn convert_baked_atlas(game_root: &Path, root: &Path) -> Result<AtlasBakeRep
                 continue;
             }
         };
-        match convert_one(&bytes, &catalogue) {
+        match convert_one(&bytes, &catalogue, &ground_cover) {
             Ok((uuid, png, size)) => {
                 let key = uuid.to_ascii_lowercase();
                 let target = output_dir.join(format!("{key}.png"));
@@ -683,7 +756,7 @@ mod tests {
     fn rendering_flips_rows_so_north_is_up() {
         // Two rows: south row grass, north row sand.
         let surface = vec![0_u8, 0, 1, 1];
-        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0, GroundCoverLayer::default());
         // Image row 0 must be the north (sand) row.
         let sand = SURFACE_PALETTE[1];
         let grass = SURFACE_PALETTE[0];
@@ -694,7 +767,7 @@ mod tests {
     #[test]
     fn surface_classes_pick_distinct_colours() {
         let surface = vec![0_u8, 1, 2, 3];
-        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        let rgba = render_tile_rgba(&surface, 2, &[], 0, &[], 0, GroundCoverLayer::default());
         let pixels: Vec<[u8; 3]> = (0..4)
             .map(|i| [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]])
             .collect();
@@ -707,20 +780,20 @@ mod tests {
     fn the_tint_modulates_the_surface_rather_than_replacing_it() {
         let surface = vec![0_u8; 4];
         // A white tint should leave the palette colour essentially untouched.
-        let white = render_tile_rgba(&surface, 2, &[0xFFFF; 4], 2, &[], 0);
-        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        let white = render_tile_rgba(&surface, 2, &[0xFFFF; 4], 2, &[], 0, GroundCoverLayer::default());
+        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0, GroundCoverLayer::default());
         assert_eq!(white[0], plain[0]);
         // A black tint darkens it towards zero.
-        let black = render_tile_rgba(&surface, 2, &[0x0000; 4], 2, &[], 0);
+        let black = render_tile_rgba(&surface, 2, &[0x0000; 4], 2, &[], 0, GroundCoverLayer::default());
         assert_eq!(black[0], 0);
     }
 
     #[test]
     fn terrain_below_the_waterline_reads_as_water() {
         let bed = vec![3_u8; 4]; // rock, as real lake beds sample
-        let dry = render_tile_rgba(&bed, 2, &[], 0, &vec![0.0_f32; 4], 2);
-        let shallow = render_tile_rgba(&bed, 2, &[], 0, &vec![-4.0_f32; 4], 2);
-        let deep = render_tile_rgba(&bed, 2, &[], 0, &vec![-30.0_f32; 4], 2);
+        let dry = render_tile_rgba(&bed, 2, &[], 0, &vec![0.0_f32; 4], 2, GroundCoverLayer::default());
+        let shallow = render_tile_rgba(&bed, 2, &[], 0, &vec![-4.0_f32; 4], 2, GroundCoverLayer::default());
+        let deep = render_tile_rgba(&bed, 2, &[], 0, &vec![-30.0_f32; 4], 2, GroundCoverLayer::default());
 
         let blueness = |px: &[u8]| i32::from(px[2]) - i32::from(px[1]);
         assert!(
@@ -732,7 +805,7 @@ mod tests {
             "deeper water should read darker and bluer"
         );
         // A few centimetres of sampling noise must not flood ordinary terrain.
-        let noise = render_tile_rgba(&bed, 2, &[], 0, &vec![-0.4_f32; 4], 2);
+        let noise = render_tile_rgba(&bed, 2, &[], 0, &vec![-0.4_f32; 4], 2, GroundCoverLayer::default());
         assert_eq!(noise, dry, "sub-threshold dips must not become water");
     }
 
@@ -741,15 +814,15 @@ mod tests {
         // The crash-site trench cuts several metres down but is dirt, not a
         // lake bed. Rendering it as water made it read as a river.
         let trench = vec![2_u8; 4]; // dirt
-        let dry = render_tile_rgba(&trench, 2, &[], 0, &vec![0.0_f32; 4], 2);
-        let cut = render_tile_rgba(&trench, 2, &[], 0, &vec![-4.0_f32; 4], 2);
+        let dry = render_tile_rgba(&trench, 2, &[], 0, &vec![0.0_f32; 4], 2, GroundCoverLayer::default());
+        let cut = render_tile_rgba(&trench, 2, &[], 0, &vec![-4.0_f32; 4], 2, GroundCoverLayer::default());
         assert_eq!(cut, dry, "a dirt gouge must stay dry regardless of depth");
 
         // Grass hollows likewise.
         let hollow = vec![0_u8; 4];
         assert_eq!(
-            render_tile_rgba(&hollow, 2, &[], 0, &vec![-4.0_f32; 4], 2),
-            render_tile_rgba(&hollow, 2, &[], 0, &vec![0.0_f32; 4], 2),
+            render_tile_rgba(&hollow, 2, &[], 0, &vec![-4.0_f32; 4], 2, GroundCoverLayer::default()),
+            render_tile_rgba(&hollow, 2, &[], 0, &vec![0.0_f32; 4], 2, GroundCoverLayer::default()),
         );
     }
 
@@ -870,18 +943,95 @@ mod tests {
     }
 
     #[test]
+    fn clutter_decodes_through_the_game_clutter_table() {
+        let table = vec![GroundCover::Grass, GroundCover::Burnt, GroundCover::Stone];
+        // Indices 0, 2, 1 and then 0xFF, which the baker writes for "nothing".
+        let decoded = decode_clutter("000201FF", 2, &table).unwrap();
+        assert_eq!(
+            decoded,
+            vec![
+                GroundCover::Grass,
+                GroundCover::Stone,
+                GroundCover::Burnt,
+                GroundCover::Bare
+            ]
+        );
+        assert!(decode_clutter("", 0, &table).unwrap().is_empty());
+        assert!(decode_clutter("0002", 2, &table).is_err(), "ragged raster");
+    }
+
+    #[test]
+    fn ground_cover_separates_meadow_from_burnt_ground() {
+        let surface = vec![0_u8; 16]; // all grass material
+        let plain = render_tile_rgba(&surface, 4, &[], 0, &[], 0, GroundCoverLayer::default());
+        let grass = vec![GroundCover::Grass; 16];
+        let burnt = vec![GroundCover::Burnt; 16];
+
+        let with_grass = render_tile_rgba(
+            &surface,
+            4,
+            &[],
+            0,
+            &[],
+            0,
+            GroundCoverLayer {
+                cover: &grass,
+                span: 4,
+            },
+        );
+        let with_burnt = render_tile_rgba(
+            &surface,
+            4,
+            &[],
+            0,
+            &[],
+            0,
+            GroundCoverLayer {
+                cover: &burnt,
+                span: 4,
+            },
+        );
+
+        assert_ne!(with_grass, plain, "grass cover should tint the ground");
+        assert_ne!(with_burnt, with_grass, "burnt must not look like meadow");
+        // Burnt ground is darker than the same material under grass.
+        assert!(with_burnt[1] < with_grass[1]);
+    }
+
+    #[test]
+    fn bare_ground_leaves_the_surface_alone() {
+        let surface = vec![0_u8; 4];
+        let bare = vec![GroundCover::Bare; 4];
+        assert_eq!(
+            render_tile_rgba(
+                &surface,
+                2,
+                &[],
+                0,
+                &[],
+                0,
+                GroundCoverLayer {
+                    cover: &bare,
+                    span: 2
+                },
+            ),
+            render_tile_rgba(&surface, 2, &[], 0, &[], 0, GroundCoverLayer::default()),
+        );
+    }
+
+    #[test]
     fn flat_terrain_is_left_unshaded() {
         let surface = vec![0_u8; 4];
         let flat = vec![10.0_f32; 4];
-        let shaded = render_tile_rgba(&surface, 2, &[], 0, &flat, 2);
-        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0);
+        let shaded = render_tile_rgba(&surface, 2, &[], 0, &flat, 2, GroundCoverLayer::default());
+        let plain = render_tile_rgba(&surface, 2, &[], 0, &[], 0, GroundCoverLayer::default());
         assert_eq!(shaded, plain, "flat ground must not pick up relief");
     }
 
     /// Brightness of the tile centre, away from the clamped border samples.
     fn centre_brightness(height: &[f32], span: usize) -> u8 {
         let surface = vec![0_u8; span * span];
-        let rgba = render_tile_rgba(&surface, span, &[], 0, height, span);
+        let rgba = render_tile_rgba(&surface, span, &[], 0, height, span, GroundCoverLayer::default());
         rgba[((span / 2) * span + span / 2) * 4]
     }
 
@@ -929,7 +1079,7 @@ mod tests {
             "color": color,
             "height": height,
         });
-        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new()).unwrap();
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new(), &[]).unwrap();
         assert_eq!(uuid, "AB-CD");
         assert_eq!(size, 1);
         assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "not a PNG");
@@ -1097,7 +1247,7 @@ mod tests {
             "color": hex_u16(&[0xF800, 0x07E0, 0x001F, 0xFFFF]),
             "height": "",
         });
-        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new())
+        let (uuid, png, size) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new(), &[])
             .expect("float-valued counts must parse");
         assert_eq!(uuid, "float-tile");
         assert_eq!(size, 2);
@@ -1120,7 +1270,7 @@ mod tests {
             "assetPalette": Value::Null,
             "assets": "",
         });
-        let (uuid, png, _) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new())
+        let (uuid, png, _) = convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new(), &[])
             .expect("a null asset palette must not fail the tile");
         assert_eq!(uuid, "empty-assets");
         assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
@@ -1137,6 +1287,6 @@ mod tests {
             "color": "",
             "height": "",
         });
-        assert!(convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new()).is_err());
+        assert!(convert_one(&serde_json::to_vec(&document).unwrap(), &HashMap::new(), &[]).is_err());
     }
 }

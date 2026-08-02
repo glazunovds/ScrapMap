@@ -444,6 +444,93 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
     catalogue
 }
 
+/// Ground cover, as a tint applied over the surface material.
+///
+/// Clutter is what separates a mown meadow from a forest floor from burnt
+/// stubble: the material sampler reports only grass/sand/dirt/rock, so without
+/// this every vegetated tile is the same flat green.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundCover {
+    /// No clutter at all: bare ground, roads, building interiors.
+    Bare,
+    Grass,
+    Weed,
+    Burnt,
+    Scrap,
+    Stone,
+    /// Underwater growth; the water layer already covers it.
+    Submerged,
+}
+
+impl GroundCover {
+    /// Tint and strength. Deliberately gentle: this modulates the terrain
+    /// rather than replacing it, so roads and shorelines still read through.
+    pub fn tint(self) -> Option<([f32; 3], f32)> {
+        match self {
+            GroundCover::Bare | GroundCover::Submerged => None,
+            GroundCover::Grass => Some(([74, 122, 52].map(|v| v as f32), 0.34)),
+            GroundCover::Weed => Some(([96, 108, 58].map(|v| v as f32), 0.26)),
+            GroundCover::Burnt => Some(([64, 56, 48].map(|v| v as f32), 0.40)),
+            GroundCover::Scrap => Some(([112, 96, 78].map(|v| v as f32), 0.30)),
+            GroundCover::Stone => Some(([124, 122, 116].map(|v| v as f32), 0.24)),
+        }
+    }
+}
+
+fn classify_clutter(name: &str) -> GroundCover {
+    let item = name.to_ascii_lowercase();
+    if item.contains("burnt") {
+        return GroundCover::Burnt;
+    }
+    if item.contains("seaweed") || item.contains("coral") || item.contains("marimo") {
+        return GroundCover::Submerged;
+    }
+    if item.contains("scrap") || item.contains("junk") || item.contains("road") {
+        return GroundCover::Scrap;
+    }
+    // fluff_short and fluff_tall are the grass tufts; there is no
+    // "env_clutter_grass" despite what the name would suggest.
+    if item.contains("fluff") || item.contains("spore") || item.contains("moss") {
+        return GroundCover::Grass;
+    }
+    if item.contains("weed") || item.contains("root") {
+        return GroundCover::Weed;
+    }
+    if item.contains("rock") || item.contains("pebble") || item.contains("stone")
+        || item.contains("mineral") || item.contains("crystal") || item.contains("ore")
+        || item.contains("stalactite") || item.contains("pyramond")
+    {
+        return GroundCover::Stone;
+    }
+    GroundCover::Bare
+}
+
+/// Reads `clutter.json`, whose array position is the index the terrain API
+/// returns from `getClutterIdxAt`.
+pub fn load_ground_cover(game_root: &Path) -> Vec<GroundCover> {
+    for part in ["Survival", "Data"] {
+        let path = game_root
+            .join(part)
+            .join("Terrain")
+            .join("Database")
+            .join("clutter.json");
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let Some(document) = parse_game_json(&bytes) else {
+            continue;
+        };
+        let Some(list) = document.get("clutterList").and_then(Value::as_array) else {
+            continue;
+        };
+        return list
+            .iter()
+            .map(|entry| {
+                classify_clutter(entry.get("name").and_then(Value::as_str).unwrap_or_default())
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
 /// Loads the catalogue, building and caching it if the cache is absent or stale.
 pub fn load(game_root: &Path, cache_root: &Path) -> HashMap<String, AssetInfo> {
     let cache_path = cache_root.join(CATALOGUE_FILE);
