@@ -24,6 +24,10 @@ SCRAPMAP_SHOOT_DWELL = 3.0
 SCRAPMAP_SHOOT_FOV = 60.0
 
 local REQUEST_PATH = "$SURVIVAL_DATA/ScrapMapCapture.json"
+-- Vertical span the ground probe searches. Comfortably brackets survival
+-- terrain, which runs from lake beds to clifftops.
+local GROUND_PROBE_TOP = 800
+local GROUND_PROBE_BOTTOM = -200
 local CELL = 64
 
 local g_shoot = nil
@@ -72,6 +76,7 @@ local function shootUpdate( dt )
 		g_shoot.index = 1
 		g_shoot.timer = 0
 		g_shoot.announced = false
+		g_shoot.ground = nil
 		sm.gui.hideGui( true )
 		sm.localPlayer.setLockedControls( true )
 		sm.camera.setCameraState( sm.camera.state.cutsceneTP )
@@ -88,7 +93,22 @@ local function shootUpdate( dt )
 	-- Cell coordinates address the cell's corner, so aim at the tile's middle.
 	local centreX = ( target.x + size * 0.5 ) * CELL
 	local centreY = ( target.y + size * 0.5 ) * CELL
-	local height = ( target.groundHeight or 0 ) + cameraHeight( metres )
+	-- Framing has to clear the local terrain, not sea level. A fixed altitude
+	-- puts the camera inside a hill or under a lake, which comes back as blank
+	-- fog or open water rather than the tile.
+	if g_shoot.ground == nil then
+		local from = sm.vec3.new( centreX, centreY, GROUND_PROBE_TOP )
+		local to = sm.vec3.new( centreX, centreY, GROUND_PROBE_BOTTOM )
+		-- pcall returns its own success flag first, then the call's results.
+		local called, hit, result = pcall( sm.physics.raycast, from, to )
+		if called and hit and type( result ) == "table" and result.pointWorld then
+			g_shoot.ground = result.pointWorld.z
+		else
+			-- Sea level is a poor guess, but better than skipping the shot.
+			g_shoot.ground = target.groundHeight or 0
+		end
+	end
+	local height = g_shoot.ground + cameraHeight( metres )
 
 	sm.camera.setFov( SCRAPMAP_SHOOT_FOV )
 	sm.camera.setPosition( sm.vec3.new( centreX, centreY, height ) )
@@ -97,14 +117,15 @@ local function shootUpdate( dt )
 	if not g_shoot.announced then
 		g_shoot.announced = true
 		sm.log.info( string.format(
-			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f",
-			tostring( target.uuid ), target.x, target.y, size, metres ) )
+			"SCRAPMAP_SHOT_V1|ready|%s|%d|%d|%d|%.2f|%.1f",
+			tostring( target.uuid ), target.x, target.y, size, metres, height ) )
 	end
 
 	g_shoot.timer = g_shoot.timer + dt
 	if g_shoot.timer >= SCRAPMAP_SHOOT_DWELL then
 		g_shoot.timer = 0
 		g_shoot.announced = false
+		g_shoot.ground = nil
 		g_shoot.index = g_shoot.index + 1
 		if g_shoot.index > #g_shoot.targets then
 			sm.gui.hideGui( false )

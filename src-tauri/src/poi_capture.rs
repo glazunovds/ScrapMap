@@ -30,6 +30,10 @@ const PHOTO_EDGE: u32 = 512;
 /// Below this the frame is almost certainly a loading screen or a black
 /// capture rather than terrain, and storing it would look like a hole.
 const MIN_LIT_FRACTION: f32 = 0.35;
+/// Minimum luminance spread for a frame to count as terrain. A camera that ends
+/// up inside a hill, under a lake or above the clouds returns an evenly lit
+/// sheet: bright enough to pass a brightness test, and completely featureless.
+const MIN_DETAIL: f32 = 6.0;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -235,6 +239,12 @@ pub fn capture_tile(
         return Err(format!(
             "frame is {:.0}% lit, which reads as a loading screen rather than terrain",
             lit * 100.0
+        ));
+    }
+    let detail = square.detail();
+    if detail < MIN_DETAIL {
+        return Err(format!(
+            "frame is featureless (detail {detail:.1}); the camera is probably inside terrain,              under water or above the cloud layer"
         ));
     }
     let scaled = square

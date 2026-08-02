@@ -80,6 +80,32 @@ impl Frame {
         })
     }
 
+    /// Mean absolute deviation of luminance, as a rough measure of detail.
+    ///
+    /// Brightness alone cannot tell terrain from a wall of fog: a camera stuck
+    /// inside a hill or above the clouds returns an evenly lit frame that is
+    /// perfectly bright and completely useless. Real terrain has contrast.
+    pub fn detail(&self) -> f32 {
+        if self.pixels.len() < 4 {
+            return 0.0;
+        }
+        let luma = |chunk: &[u8]| {
+            (0.299 * f32::from(chunk[0]) + 0.587 * f32::from(chunk[1]) + 0.114 * f32::from(chunk[2]))
+        };
+        let mut sum = 0.0_f64;
+        let mut count = 0_u32;
+        for chunk in self.pixels.chunks_exact(4) {
+            sum += f64::from(luma(chunk));
+            count += 1;
+        }
+        let mean = (sum / f64::from(count.max(1))) as f32;
+        let mut deviation = 0.0_f64;
+        for chunk in self.pixels.chunks_exact(4) {
+            deviation += f64::from((luma(chunk) - mean).abs());
+        }
+        (deviation / f64::from(count.max(1))) as f32
+    }
+
     /// Share of pixels carrying any signal. A window that refuses to be
     /// captured comes back uniformly black, so this distinguishes a real frame
     /// from a failed one better than the API's own success return does.
@@ -261,6 +287,26 @@ mod tests {
         assert_eq!((small.width, small.height), (4, 4));
         assert_eq!(&small.pixels[0..4], &[10, 200, 30, 255]);
         assert_eq!(&small.pixels[small.pixels.len() - 4..], &[10, 200, 30, 255]);
+    }
+
+    #[test]
+    fn detail_separates_terrain_from_a_wall_of_fog() {
+        // A camera inside a hill or above the clouds returns an evenly lit
+        // sheet. It is bright, so brightness alone accepts it; it carries no
+        // detail, which is what actually distinguishes it from terrain.
+        let fog = frame(16, 16, |_, _| [188, 190, 196, 255]);
+        assert!(fog.lit_fraction() > 0.9, "fog is bright, hence the problem");
+        assert!(fog.detail() < 1.0, "fog should read as featureless");
+
+        let terrain = frame(16, 16, |x, y| {
+            let value = ((x * 37 + y * 61) % 200) as u8;
+            [value, value / 2 + 40, 60, 255]
+        });
+        assert!(
+            terrain.detail() > 10.0,
+            "terrain should carry contrast, got {}",
+            terrain.detail()
+        );
     }
 
     #[test]
