@@ -60,18 +60,43 @@
     if (title) document.title = title;
   }
 
-  async function load(code) {
-    if (dictionaries.has(code)) return true;
-    try {
-      const response = await fetch(`locales/${code}.json`, { cache: "no-cache" });
-      if (!response.ok) return false;
-      const table = await response.json();
-      if (!table || typeof table !== "object") return false;
-      dictionaries.set(code, table);
-      return true;
-    } catch (_error) {
-      return false;
-    }
+  /**
+   * Loads every dictionary at once.
+   *
+   * The native host serves them from the binary, because fetching them over
+   * the asset protocol failed silently and left the panel showing raw keys.
+   * A browser -- which is how this page is tested -- still fetches.
+   */
+  let loading = null;
+  function loadAll() {
+    if (loading) return loading;
+    loading = (async () => {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (typeof invoke === "function") {
+        try {
+          const tables = await invoke("interface_strings");
+          Object.entries(tables || {}).forEach(([code, table]) => {
+            if (table && typeof table === "object") dictionaries.set(code, table);
+          });
+          if (dictionaries.size) return;
+        } catch (_error) {
+          /* fall through to fetch */
+        }
+      }
+      await Promise.all(
+        LANGUAGES.map(async (entry) => {
+          try {
+            const response = await fetch(`locales/${entry.code}.json`);
+            if (!response.ok) return;
+            const table = await response.json();
+            if (table && typeof table === "object") dictionaries.set(entry.code, table);
+          } catch (_error) {
+            /* a language that will not load falls back to English */
+          }
+        })
+      );
+    })();
+    return loading;
   }
 
   function preferred() {
@@ -88,8 +113,7 @@
 
   async function setLanguage(code) {
     const wanted = LANGUAGES.some((entry) => entry.code === code) ? code : FALLBACK;
-    await load(FALLBACK);
-    if (wanted !== FALLBACK) await load(wanted);
+    await loadAll();
     active = dictionaries.has(wanted) ? wanted : FALLBACK;
     try {
       window.localStorage?.setItem(STORAGE_KEY, active);

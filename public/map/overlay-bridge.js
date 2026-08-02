@@ -1617,6 +1617,12 @@
     }
   });
 
+  // Strings arrive after the first render, and again whenever the language
+  // changes, so anything drawn from a key has to be drawn again.
+  window.addEventListener("sm-minimap:language", () => {
+    renderProfileUi(profileUiSnapshot, document.body.dataset.profileState || "ready");
+  });
+
   // The tray owns the language setting, because it is the one surface that
   // exists before the map does. Applied here without a reload.
   listen?.("scrapmap:language", (event) => {

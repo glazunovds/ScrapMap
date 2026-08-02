@@ -693,6 +693,27 @@ fn patch_targets(state: &OverlayState) -> Result<(PathBuf, PathBuf), String> {
     Ok((game_root, cache_root))
 }
 
+/// Every interface dictionary, compiled in.
+///
+/// The panel used to fetch `locales/<code>.json` over the asset protocol and
+/// silently fall back to keys when that did not work -- which is how the map
+/// came to display `BADGE_RESOLVING` at the user. Reading them from the binary
+/// removes the question: they are already compiled in for the tray, and the
+/// JSON files stay the single source for both.
+#[tauri::command]
+fn interface_strings() -> serde_json::Value {
+    serde_json::json!({
+        "en": serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../public/map/locales/en.json"
+        ))
+        .unwrap_or(serde_json::Value::Null),
+        "ru": serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../public/map/locales/ru.json"
+        ))
+        .unwrap_or(serde_json::Value::Null),
+    })
+}
+
 /// Appends a line to `%LOCALAPPDATA%\ScrapMap\ui.log`.
 ///
 /// A release build has no devtools, so when the panel misbehaves there is
@@ -1366,6 +1387,7 @@ pub fn run() {
             diagnostic_status,
             game_layout_snapshot,
             atlas_bake_refresh,
+            interface_strings,
             log_ui_event,
             set_interface_language,
             game_patch_status,
