@@ -626,6 +626,86 @@ fn merge_manifest(root: &Path, generated: &BTreeMap<String, Option<u32>>) -> Res
     .map_err(|error| format!("write manifest: {error}"))
 }
 
+/// The ground a tile should be photographed against.
+///
+/// Heights are absolute world Z in metres, which was checked against telemetry:
+/// with the player on foot, its reported height sits inside its own tile's
+/// sampled band 79,481 times out of 79,540, and every exception is *above* the
+/// band -- a player standing on a base or a building, not a shifted origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TileTerrain {
+    /// Median sampled height: the plane most of the tile actually sits at, and
+    /// so the one to frame against.
+    pub ground: f32,
+    /// How far the tile's high ground rises above that plane. Terrain leans out
+    /// over a top-down frame exactly the way a building does, so the sweep pulls
+    /// the camera back for a hill as well as for a tower.
+    pub relief: f32,
+    /// Height of the tallest thing standing on the tile, from the collision mesh
+    /// of every asset the bake recorded. Measured here rather than raycast in
+    /// the game, because the in-game probe returned nothing for three sweeps and
+    /// the pull-back it was supposed to drive never once engaged.
+    pub structure: f32,
+}
+
+/// Reads the ground height of every baked tile.
+///
+/// This exists because a downward raycast is not a reliable way to find the
+/// ground from the air, and the atlas already holds the answer -- sampled by the
+/// game itself, for every tile, with no physics involved.
+pub fn tile_terrain(game_root: &Path, cache_root: &Path) -> BTreeMap<String, TileTerrain> {
+    let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+    let Ok(listing) = fs::read_dir(&baked_dir) else {
+        return BTreeMap::new();
+    };
+    let catalogue = asset_catalogue::load(game_root, cache_root);
+
+    let mut terrain = BTreeMap::new();
+    for entry in listing.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|value| value != "json") {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let Ok(tile) = serde_json::from_slice::<BakedTileFile>(&bytes) else {
+            continue;
+        };
+        if tile.height_span == 0 || tile.height_span > MAX_SPAN {
+            continue;
+        }
+        let Ok(raw) = decode_hex_u16(&tile.height, tile.height_span * tile.height_span) else {
+            continue;
+        };
+        let mut heights: Vec<f32> = raw.into_iter().map(decode_height).collect();
+        if heights.is_empty() {
+            continue;
+        }
+        heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let at = |fraction: f32| heights[((heights.len() as f32 * fraction) as usize).min(heights.len() - 1)];
+        let ground = at(0.5);
+        // The palette lists every asset the tile places, which is all this
+        // needs: the tallest one decides the pull-back wherever it stands.
+        let structure = tile
+            .asset_palette
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()))
+            .map(|asset| asset.height)
+            .fold(0.0_f32, f32::max);
+        // The 95th percentile rather than the maximum: one spike should not pull
+        // the camera back for the whole tile.
+        terrain.insert(
+            tile.uuid.to_ascii_lowercase(),
+            TileTerrain {
+                ground,
+                relief: (at(0.95) - ground).max(0.0),
+                structure,
+            },
+        );
+    }
+    terrain
+}
+
 /// Converts every baked tile under `<gameRoot>/Survival/ScrapMapAtlas`.
 ///
 /// Conversion is incremental: a tile whose PNG is already newer than its baked
@@ -831,6 +911,7 @@ mod tests {
             kind,
             color,
             radius,
+            height: 0.0,
         })
     }
 
@@ -1120,6 +1201,50 @@ mod tests {
             "color": hex_u16(&color),
             "height": hex_u16(&height),
         })
+    }
+
+    #[test]
+    fn tile_terrain_reports_the_typical_ground_and_how_far_it_rises() {
+        let game_root = scratch_dir("terrain-game");
+        let baked_dir = game_root.join("Survival").join("ScrapMapAtlas");
+        fs::create_dir_all(&baked_dir).unwrap();
+
+        // A plateau at 20 m with a corner of the tile rising to 60 m. The plane
+        // to frame against is the plateau, not the average and not the peak.
+        let mut samples = vec![32768u16 + 200; 16]; // 20.0 m
+        for sample in samples.iter_mut().take(2) {
+            *sample = 32768 + 600; // 60.0 m
+        }
+        fs::write(
+            baked_dir.join("hill.json"),
+            serde_json::to_vec(&json!({
+                "uuid": "HILL",
+                "size": 1.0,
+                "heightSpan": 4.0,
+                "height": hex_u16(&samples),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let cache_root = scratch_dir("terrain-cache");
+        let terrain = tile_terrain(&game_root, &cache_root);
+        // Looked up in lower case, because the layout and the bake disagree.
+        let tile = terrain.get("hill").expect("the tile should be read");
+        assert!((tile.ground - 20.0).abs() < 0.05, "ground was {}", tile.ground);
+        assert!(tile.relief > 0.0, "a 40 m rise should register as relief");
+
+        // A tile with no height raster is skipped rather than reported as flat
+        // sea level, so the caller can tell the difference.
+        fs::write(
+            baked_dir.join("bare.json"),
+            serde_json::to_vec(&json!({ "uuid": "BARE", "size": 1.0 })).unwrap(),
+        )
+        .unwrap();
+        assert!(!tile_terrain(&game_root, &cache_root).contains_key("bare"));
+
+        fs::remove_dir_all(&game_root).ok();
+        fs::remove_dir_all(&cache_root).ok();
     }
 
     #[test]

@@ -19,9 +19,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const CATALOGUE_FILE: &str = "asset-catalogue.json";
-const CATALOGUE_VERSION: u32 = 2;
+const CATALOGUE_VERSION: u32 = 3;
 /// Collision meshes are metres; nothing legitimate is wider than a tile.
 const MAX_RADIUS: f32 = 64.0;
+/// Nothing placed on a tile is taller than this; a larger reading is a mesh
+/// whose units are not what they are assumed to be, not a real structure.
+const MAX_HEIGHT: f32 = 120.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -200,16 +203,21 @@ fn representative_color(colors: &Value) -> Option<[u8; 3]> {
 /// consistently too large or too small.
 const MESH_UNITS_PER_METRE: f32 = 10.0;
 
-/// Measures a collision mesh's horizontal half-extent.
+/// Measures a collision mesh's horizontal half-extent and its height.
 ///
 /// Uses the bounding box rather than distance from the origin: asset meshes are
 /// not centred on their pivot, so an origin radius overstates anything modelled
 /// off to one side. Not every `.obj` here is text -- some are compiled -- so a
 /// line that will not parse is skipped rather than failing the whole mesh.
-fn radius_from_obj(path: &Path) -> Option<f32> {
+///
+/// The height is the vertical extent, in the same units. The POI photography
+/// sweep uses it to decide how far back the camera has to go: something as tall
+/// as the camera is high leans right out over the tile in a top-down frame.
+fn extent_from_obj(path: &Path) -> Option<(f32, f32)> {
     let text = fs::read_to_string(path).ok()?;
     let (mut min_x, mut max_x) = (f32::MAX, f32::MIN);
     let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
+    let (mut min_z, mut max_z) = (f32::MAX, f32::MIN);
     let mut seen = 0_u32;
 
     for line in text.lines() {
@@ -230,6 +238,14 @@ fn radius_from_obj(path: &Path) -> Option<f32> {
         max_x = max_x.max(x);
         min_y = min_y.min(y);
         max_y = max_y.max(y);
+        // A mesh without a parseable third component still contributes its
+        // footprint; it just does not contribute a height.
+        if let Some(z) = parts.next().and_then(|value| value.parse::<f32>().ok()) {
+            if z.is_finite() {
+                min_z = min_z.min(z);
+                max_z = max_z.max(z);
+            }
+        }
         seen += 1;
     }
 
@@ -237,7 +253,12 @@ fn radius_from_obj(path: &Path) -> Option<f32> {
         return None;
     }
     let radius = ((max_x - min_x) / 2.0).max((max_y - min_y) / 2.0) / MESH_UNITS_PER_METRE;
-    (radius > 0.0).then(|| radius.min(MAX_RADIUS))
+    let height = if max_z > min_z {
+        ((max_z - min_z) / MESH_UNITS_PER_METRE).min(MAX_HEIGHT)
+    } else {
+        0.0
+    };
+    (radius > 0.0).then(|| (radius.min(MAX_RADIUS), height))
 }
 
 /// Resolves the game's `$SURVIVAL_DATA` / `$GAME_DATA` path variables.
@@ -257,6 +278,10 @@ pub struct AssetInfo {
     pub kind: AssetKind,
     pub color: [u8; 3],
     pub radius: f32,
+    /// Vertical extent of the collision mesh, in metres. Zero for anything with
+    /// no mesh to measure, which includes every harvestable.
+    #[serde(default)]
+    pub height: f32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -384,6 +409,9 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                         kind,
                         color,
                         radius: harvestable_radius(kind, name),
+                        // Harvestables have no collision mesh here, and a wood
+                        // is not a structure the camera should pull back for.
+                        height: 0.0,
                     },
                 );
             }
@@ -422,12 +450,13 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                     .get("defaultColors")
                     .and_then(representative_color)
                     .unwrap_or_else(|| kind.default_color());
-                let radius = asset
+                let extent = asset
                     .get("col")
                     .and_then(Value::as_str)
                     .and_then(|raw| resolve_game_path(game_root, raw))
-                    .and_then(|path| radius_from_obj(&path))
-                    .unwrap_or_else(|| kind.default_radius());
+                    .and_then(|path| extent_from_obj(&path));
+                let (radius, height) =
+                    extent.unwrap_or_else(|| (kind.default_radius(), 0.0));
 
                 catalogue.insert(
                     uuid.to_ascii_lowercase(),
@@ -435,6 +464,7 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                         kind,
                         color,
                         radius,
+                        height,
                     },
                 );
             }
@@ -611,7 +641,7 @@ mod tests {
             "v -20.0 0.0 0.0\nv 20.0 20.0 900.0\nv 0.0 10.0 5.0\nv ytsaq garbage\nf 1 2 3\n",
         )
         .unwrap();
-        let radius = radius_from_obj(&path).unwrap();
+        let (radius, _) = extent_from_obj(&path).unwrap();
         assert!((radius - 2.0).abs() < 0.001, "got {radius}");
         fs::remove_dir_all(&directory).ok();
     }
@@ -628,7 +658,7 @@ mod tests {
             "v 500.0 0.0 0.0\nv 510.0 10.0 0.0\nv 505.0 5.0 1.0\n",
         )
         .unwrap();
-        let radius = radius_from_obj(&path).unwrap();
+        let (radius, _) = extent_from_obj(&path).unwrap();
         assert!((radius - 0.5).abs() < 0.001, "got {radius}");
         fs::remove_dir_all(&directory).ok();
     }

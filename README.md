@@ -76,6 +76,7 @@ tile atlas cache. Everything in the atlas cache is disposable and rebuilds.
 | `docs/MULTIPLAYER-TEST.md` | Instructions for the second player |
 | `docs/SYNC.md` | Shared fog and markers design (not started) |
 | `docs/ROADMAP.md` | Milestones and what remains |
+| `docs/HANDOFF.md` | POI photography: state, faults found, open questions |
 | `docs/DIAGNOSTIC-FEED.md` | Legacy JSON telemetry input |
 
 ## Scope

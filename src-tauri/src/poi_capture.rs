@@ -19,7 +19,10 @@ use std::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::window_capture::{capture_window, Frame};
+use crate::{
+    atlas_bake,
+    window_capture::{capture_window, Frame},
+};
 
 /// Where the sweep request is left for Lua to find on the next world load.
 const REQUEST_FILE: &str = "ScrapMapCapture.json";
@@ -45,9 +48,25 @@ pub struct CaptureTarget {
     pub x: i64,
     pub y: i64,
     pub size: u32,
-    /// Ground height to add to the camera's altitude, so a clifftop POI is
-    /// framed from the same distance as one at sea level.
+    /// Absolute world height of the plane to frame against, so a clifftop POI is
+    /// photographed from the same distance as one at sea level.
+    ///
+    /// This comes from the baked atlas rather than from a raycast in the game.
+    /// The sweep spent three runs framing everything from sea level because the
+    /// in-game ground probe silently never hit anything.
     pub ground_height: f64,
+    /// How far the tile's high ground rises above that plane, and the height of
+    /// the tallest thing standing on it. The sweep pulls the camera back for
+    /// whichever is larger, so that neither leans out over the tile's edges.
+    pub relief_height: f64,
+    pub structure_height: f64,
+    /// Quarter turns the chosen placement is rotated by, 0..3.
+    ///
+    /// The generated atlas samples tiles unrotated and the renderer turns them
+    /// per placement. A photograph is of a real placement, so it already carries
+    /// that rotation and would be turned a second time. Where the world offers
+    /// an unrotated placement this is 0 and the two conventions agree.
+    pub rotation: u32,
 }
 
 /// Chooses one representative placement per POI tile.
@@ -56,7 +75,15 @@ pub struct CaptureTarget {
 /// in the test world -- but the photograph keys on the tile, so only one
 /// instance of each is worth visiting. Filler is skipped: it restates terrain
 /// the generated atlas already draws.
-pub fn build_targets(layout: &Value) -> Vec<CaptureTarget> {
+///
+/// `terrain` supplies the height to frame each tile against. A tile missing from
+/// it falls back to sea level, which is wrong for anything on high ground --
+/// `poi_capture_prepare` reports the count so that is visible rather than
+/// silent.
+pub fn build_targets(
+    layout: &Value,
+    terrain: &BTreeMap<String, atlas_bake::TileTerrain>,
+) -> Vec<CaptureTarget> {
     let Some(cells) = layout.get("cells").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -84,8 +111,16 @@ pub fn build_targets(layout: &Value) -> Vec<CaptureTarget> {
         let Some(uuid) = cell.get("uuid").and_then(Value::as_str) else {
             continue;
         };
-        if chosen.contains_key(uuid) {
-            continue;
+        let rotation = cell
+            .get("rotation")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .rem_euclid(4.0) as u32;
+        // Prefer an unrotated placement: photographed there, the picture matches
+        // the convention the generated tiles already use.
+        match chosen.get(uuid) {
+            Some(existing) if existing.rotation == 0 || rotation != 0 => continue,
+            _ => {}
         }
         let (Some(x), Some(y)) = (
             cell.get("x").and_then(Value::as_f64),
@@ -93,6 +128,7 @@ pub fn build_targets(layout: &Value) -> Vec<CaptureTarget> {
         ) else {
             continue;
         };
+        let ground = terrain.get(&uuid.to_ascii_lowercase());
         chosen.insert(
             uuid.to_owned(),
             CaptureTarget {
@@ -104,7 +140,10 @@ pub fn build_targets(layout: &Value) -> Vec<CaptureTarget> {
                     .and_then(Value::as_f64)
                     .unwrap_or(1.0)
                     .max(1.0) as u32,
-                ground_height: 0.0,
+                ground_height: ground.map(|value| f64::from(value.ground)).unwrap_or(0.0),
+                relief_height: ground.map(|value| f64::from(value.relief)).unwrap_or(0.0),
+                structure_height: ground.map(|value| f64::from(value.structure)).unwrap_or(0.0),
+                rotation,
             },
         );
     }
@@ -362,11 +401,66 @@ mod tests {
             cell("aa", 40.0, 9.0, 4.0, Some("POI_WAREHOUSE2_LARGE"), (0.0, 0.0)),
             cell("bb", 3.0, 4.0, 1.0, Some("POI_CAMP"), (0.0, 0.0)),
         ]});
-        let targets = build_targets(&layout);
+        let targets = build_targets(&layout, &BTreeMap::new());
         assert_eq!(targets.len(), 2);
         assert_eq!(targets[0].uuid, "aa");
         assert_eq!(targets[0].size, 4);
         assert_eq!(targets[1].uuid, "bb");
+    }
+
+    fn rotated_cell(uuid: &str, x: f64, rotation: f64) -> Value {
+        let mut value = cell(uuid, x, 0.0, 1.0, Some("POI_RUIN"), (0.0, 0.0));
+        value["rotation"] = json!(rotation);
+        value
+    }
+
+    #[test]
+    fn an_unrotated_placement_is_preferred_over_a_turned_one() {
+        // A photograph carries the placement's rotation, and the renderer turns
+        // tiles again when it draws them. Shooting an unrotated placement is
+        // what keeps a photograph in the same convention as a generated tile.
+        let layout = json!({ "cells": [
+            rotated_cell("ruin", 0.0, 2.0),
+            rotated_cell("ruin", 9.0, 0.0),
+            rotated_cell("ruin", 4.0, 1.0),
+            // This tile is only ever placed turned, so there is nothing to
+            // prefer; the rotation is carried so the caller can see that.
+            rotated_cell("turned", 1.0, 3.0),
+            rotated_cell("turned", 6.0, 3.0),
+        ]});
+        let targets = build_targets(&layout, &BTreeMap::new());
+        let ruin = targets.iter().find(|t| t.uuid == "ruin").unwrap();
+        assert_eq!(ruin.rotation, 0, "the unrotated placement should win");
+        assert_eq!(ruin.x, 9, "and it should be that placement's position");
+        assert_eq!(targets.iter().find(|t| t.uuid == "turned").unwrap().rotation, 3);
+    }
+
+    #[test]
+    fn a_target_is_framed_against_its_own_ground_when_the_atlas_knows_it() {
+        let layout = json!({ "cells": [
+            cell("HIGH", 0.0, 0.0, 1.0, Some("POI_TOWER"), (0.0, 0.0)),
+            cell("unbaked", 1.0, 0.0, 1.0, Some("POI_CAMP"), (0.0, 0.0)),
+        ]});
+        let mut terrain = BTreeMap::new();
+        terrain.insert(
+            "high".to_owned(),
+            atlas_bake::TileTerrain {
+                ground: 47.5,
+                relief: 12.0,
+                structure: 31.0,
+            },
+        );
+
+        let targets = build_targets(&layout, &terrain);
+        let high = targets.iter().find(|t| t.uuid == "HIGH").unwrap();
+        assert_eq!(high.ground_height, 47.5);
+        assert_eq!(high.relief_height, 12.0);
+        assert_eq!(high.structure_height, 31.0);
+        // A tile the atlas has never baked falls back to sea level. That is
+        // wrong for high ground, which is why the count is reported to the user
+        // rather than swallowed.
+        let unbaked = targets.iter().find(|t| t.uuid == "unbaked").unwrap();
+        assert_eq!(unbaked.ground_height, 0.0);
     }
 
     #[test]
@@ -376,7 +470,7 @@ mod tests {
             cell("road", 1.0, 0.0, 1.0, Some("POI_ROAD_RANDOM"), (0.0, 0.0)),
             cell("grass", 2.0, 0.0, 1.0, None, (0.0, 0.0)),
         ]});
-        assert!(build_targets(&layout).is_empty());
+        assert!(build_targets(&layout, &BTreeMap::new()).is_empty());
     }
 
     #[test]
@@ -386,7 +480,7 @@ mod tests {
             cell("ship", 9.0, 9.0, 4.0, Some("POI_CRASHSITE_AREA"), (1.0, 2.0)),
             cell("ship", 5.0, 4.0, 4.0, Some("POI_CRASHSITE_AREA"), (0.0, 0.0)),
         ]});
-        let targets = build_targets(&layout);
+        let targets = build_targets(&layout, &BTreeMap::new());
         assert_eq!(targets.len(), 1);
         assert_eq!((targets[0].x, targets[0].y), (5, 4));
     }
@@ -438,6 +532,9 @@ mod tests {
             y: 7,
             size: 2,
             ground_height: 0.0,
+            relief_height: 0.0,
+            structure_height: 0.0,
+            rotation: 0,
         }];
         let path = write_request(&root, &targets).unwrap();
         let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();

@@ -13,9 +13,18 @@
 -- exactly the guarantee the sweep needs.
 --
 -- Each target is visited in two hops. The first drops the player in high above
--- the tile, which forces the cell to load and lets its neighbours stream in.
--- Only then can a downward raycast find the ground, and the second hop puts the
--- player at a known height above it -- specifically, above the camera.
+-- the tile, which forces the cell to load and lets its neighbours stream in; the
+-- second puts the player at a known height above the ground -- specifically,
+-- above the camera.
+--
+-- Nothing about the scene is measured here any more. The ground, the terrain
+-- relief and the height of the tallest building all arrive in the request,
+-- worked out from the baked atlas and the assets' own collision meshes.
+--
+-- They used to be raycast in-game, and it never once worked: sm.physics.raycast
+-- returns a RaycastResult *userdata*, so a `type( result ) == "table"` guard is
+-- always false. Three sweeps framed every shot from sea level and never pulled
+-- the camera back for a single tower, reporting nothing worse than "miss".
 --
 -- Above the camera on purpose. The camera looks straight down, so a player
 -- higher than it is outside the frame no matter how the view is cropped, and a
@@ -42,7 +51,7 @@
 -- next world load, which is when this file next looks for it. ScrapMap removes
 -- the file once the sweep reports done, so it runs once rather than every load.
 
-SCRAPMAP_SHOOT_VERSION = 3
+SCRAPMAP_SHOOT_VERSION = 4
 
 -- Seconds to hold the framed pose. Covers ScrapMap's poll and capture; the log
 -- line is emitted at the start so the capture lands mid-dwell.
@@ -63,10 +72,6 @@ SCRAPMAP_SHOOT_TRAVEL_TIMEOUT = 10.0
 SCRAPMAP_SHOOT_FOV = 60.0
 
 local REQUEST_PATH = "$SURVIVAL_DATA/ScrapMapCapture.json"
--- Vertical span the ground probe searches. Comfortably brackets survival
--- terrain, which runs from lake beds to clifftops.
-local GROUND_PROBE_TOP = 800
-local GROUND_PROBE_BOTTOM = -200
 -- Where the first hop puts the player: clear of every clifftop, so the scene
 -- streams in without the character ever being buried inside it.
 local TRAVEL_ALTITUDE = 400
@@ -84,10 +89,6 @@ local PLAYER_LIFT = 150
 local PERCH_MARGIN = 10
 -- Dropped from this height when the player is put back where they started.
 local LANDING_CLEARANCE = 1.0
--- Casts per axis when measuring how tall the tile's buildings are. Fixed rather
--- than scaled by tile size: eighty-one casts is nothing once per target, and a
--- grid fine enough for a one-cell tile would be thousands on a sixteen.
-local STRUCTURE_GRID = 9
 -- How many times its own height above a structure the camera should sit. Four
 -- puts the roof a third of the way up the column, which reads as a plan view
 -- rather than an oblique one.
@@ -143,70 +144,6 @@ local function arrivedAt( x, y )
 	return dx * dx + dy * dy <= ARRIVE_RADIUS * ARRIVE_RADIUS
 end
 
--- Casts straight down at one point and returns the height it hit, or nil.
-local function probeAt( x, y, filter )
-	local from = sm.vec3.new( x, y, GROUND_PROBE_TOP )
-	local to = sm.vec3.new( x, y, GROUND_PROBE_BOTTOM )
-	-- The character is excluded by name as well as by filter: it is falling
-	-- through this very column, and an unfiltered cast hits it first.
-	local character = localCharacter()
-	local called, hit, result
-	if filter then
-		called, hit, result = pcall( sm.physics.raycast, from, to, character, filter )
-	else
-		called, hit, result = pcall( sm.physics.raycast, from, to, character )
-	end
-	if called and hit and type( result ) == "table" and result.pointWorld then
-		return result.pointWorld.z
-	end
-	return nil
-end
-
--- Measures the ground under the tile's centre.
-local function probeGround( x, y, fallback )
-	local filter = sm.physics.filter and sm.physics.filter.terrainSurface
-	local surface = filter and probeAt( x, y, filter )
-	if surface == nil then
-		surface = probeAt( x, y, nil )
-	end
-	if surface ~= nil then
-		return surface, "hit"
-	end
-	-- Sea level is a poor guess, but better than skipping the shot.
-	return fallback or 0, "miss"
-end
-
--- Measures how far the tallest thing standing on the tile rises above the
--- ground, by sampling a grid of downward casts across the whole footprint.
---
--- This is what decides how far back the camera goes. A tower photographed from
--- a camera only its own height above the ground leans right out over the tile's
--- edges, because its roof is barely below the lens; pulling back shrinks that
--- towards a true plan view.
---
--- Filtered to terrain assets, which is where buildings, towers, the crashed
--- ship and giant trees live. Ordinary forest is a harvestable and is excluded on
--- purpose -- a wood is not a structure, and treating it as one would push the
--- camera back for half the map.
-local function probeStructure( centreX, centreY, metres, ground )
-	local filter = sm.physics.filter and sm.physics.filter.terrainAsset
-	if filter == nil then
-		return 0
-	end
-	local top = ground
-	local step = metres / ( STRUCTURE_GRID - 1 )
-	for i = 0, STRUCTURE_GRID - 1 do
-		for j = 0, STRUCTURE_GRID - 1 do
-			local hit = probeAt( centreX - metres * 0.5 + i * step,
-				centreY - metres * 0.5 + j * step, filter )
-			if hit ~= nil and hit > top then
-				top = hit
-			end
-		end
-	end
-	return top - ground
-end
-
 -- Re-applied whenever the character changes, not just once at the start.
 -- Recreating the character is how the sweep travels, and a fresh character
 -- brings back the HUD, the player's own controls and the default camera unless
@@ -221,7 +158,6 @@ local function holdPose()
 		sm.gui.hideGui( true )
 		sm.localPlayer.setLockedControls( true )
 		sm.camera.setCameraState( sm.camera.state.cutsceneTP )
-		sm.render.setCinematic( true )
 		-- The player stands at the tile's centre for the exposure, which is the
 		-- middle of the photograph. Hide it rather than photograph it.
 		if character then
@@ -240,7 +176,6 @@ local function releasePose()
 	sm.gui.hideGui( false )
 	sm.localPlayer.setLockedControls( false )
 	sm.camera.setCameraState( sm.camera.state.default )
-	sm.render.setCinematic( false )
 end
 
 local function targetCentre( target )
@@ -354,9 +289,15 @@ local function shootUpdate( game, dt )
 		if g_shoot.timer < SCRAPMAP_SHOOT_SETTLE then
 			return
 		end
-		-- The scene has streamed, so the raycasts now have something to hit.
-		g_shoot.ground, g_shoot.probed = probeGround( centreX, centreY, target.groundHeight )
-		local structure = probeStructure( centreX, centreY, metres, g_shoot.ground )
+		-- The ground comes from the baked atlas, not from a raycast. The game
+		-- samples every tile's height when it bakes the map, which is exact and
+		-- needs no physics; casting for it from the air is what silently failed
+		-- for three sweeps and framed the entire map from sea level.
+		g_shoot.ground = target.groundHeight or 0
+		g_shoot.probed = target.groundHeight and "atlas" or "sealevel"
+		-- Terrain relief counts as structure: a hill leans out over a top-down
+		-- frame exactly the way a tower does.
+		local structure = math.max( target.reliefHeight or 0, target.structureHeight or 0 )
 		local exact = cameraHeight( metres )
 		-- Far enough back that the tile's buildings stand up rather than lean
 		-- out, but never so far that the crop costs more than it is worth.

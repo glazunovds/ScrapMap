@@ -445,13 +445,27 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
     let layout: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|error| format!("layout is invalid: {error}"))?;
 
-    let targets = poi_capture::build_targets(&layout);
+    // The sweep frames each shot against the tile's own ground, taken from the
+    // baked atlas. Without it every photograph is framed from sea level, so say
+    // how many targets are missing one rather than letting it pass unnoticed.
+    let cache_root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
+    let terrain = atlas_bake::tile_terrain(game_root, &cache_root);
+    let targets = poi_capture::build_targets(&layout, &terrain);
     if targets.is_empty() {
         return Err("this world has no points of interest to photograph".to_owned());
     }
+    let without_ground = targets
+        .iter()
+        .filter(|target| !terrain.contains_key(&target.uuid.to_ascii_lowercase()))
+        .count();
     poi_capture::write_request(game_root, &targets)?;
+    // A tile only ever placed turned has to be photographed turned, and the
+    // renderer will turn it again. Report it rather than let it look like noise.
+    let rotated = targets.iter().filter(|target| target.rotation != 0).count();
     Ok(serde_json::json!({
         "targets": targets.len(),
+        "withoutGroundHeight": without_ground,
+        "rotatedPlacements": rotated,
         "note": "reload the survival world to run the sweep",
     }))
 }

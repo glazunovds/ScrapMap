@@ -78,6 +78,16 @@ worked near the player, and why it now teleports the player too, via
 `SurvivalGame.sv_e_recreatePlayerInWorld` — the game's own travel path, which
 loads the destination cell *before* recreating the character there.
 
+**`sm.physics.raycast` returns a userdata, not a table.** Guarding its result
+with `type( result ) == "table"` is always false. This silently disabled both
+probes in the POI sweep for three full runs, which framed every photograph from
+sea level and never pulled the camera back for a single tower — while reporting
+nothing worse than a probe "miss". Prefer measuring from baked atlas data over
+casting rays at all; see `docs/HANDOFF.md`.
+
+**`sm.render.setCinematic( true )` draws letterbox bars.** It cost the top and
+bottom tenth of all 116 POI photographs. `sm.gui.hideGui` is what hides the HUD.
+
 **`BitBlt` returns pure black on the game window** because it is
 DirectX-presented. `PrintWindow` with `PW_RENDERFULLCONTENT` returns a real
 frame. `cargo run --example capture_probe` re-answers this in one command, which
