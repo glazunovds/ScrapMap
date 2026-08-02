@@ -21,7 +21,7 @@
 -- twenty seconds on the first world load and nothing afterwards. Lower it to
 -- spread the work across several loads instead.
 
-SCRAPMAP_ATLAS_VERSION = 5
+SCRAPMAP_ATLAS_VERSION = 6
 
 -- Samples per cell edge. Material drives the picture, so it gets one sample per
 -- metre, keeping 8 m roads about 8 px wide. Tint and height vary smoothly and
@@ -86,12 +86,29 @@ end
 -- once per instance.
 local ASSET_QUARTER_METRE_MAX = 4095
 
-local function encodeAsset( paletteIndex, x, y )
+-- Yaw around Z, out of the asset's quaternion, as a 1/256th of a turn.
+--
+-- Buildings are drawn from their collision mesh footprint rather than as a
+-- disc, and a footprint at the wrong angle looks worse than a circle -- so the
+-- angle has to come across too. A quarter of a degree is plenty for a shape a
+-- few pixels across.
+local function encodeYaw( rot )
+	if rot == nil then return 0 end
+	local ok, yaw = pcall( function()
+		return math.atan2( 2 * ( rot.w * rot.z + rot.x * rot.y ),
+			1 - 2 * ( rot.y * rot.y + rot.z * rot.z ) )
+	end )
+	if not ok or type( yaw ) ~= "number" then return 0 end
+	local turns = ( yaw / ( math.pi * 2 ) ) % 1
+	return math.floor( turns * 256 ) % 256
+end
+
+local function encodeAsset( paletteIndex, x, y, yaw )
 	local qx = math.floor( x * 4 + 0.5 )
 	local qy = math.floor( y * 4 + 0.5 )
 	if qx < 0 then qx = 0 elseif qx > ASSET_QUARTER_METRE_MAX then qx = ASSET_QUARTER_METRE_MAX end
 	if qy < 0 then qy = 0 elseif qy > ASSET_QUARTER_METRE_MAX then qy = ASSET_QUARTER_METRE_MAX end
-	return string.format( "%03X%03X%03X", paletteIndex, qx, qy )
+	return string.format( "%03X%03X%03X%02X", paletteIndex, qx, qy, yaw )
 end
 
 local function encodeHeight( h )
@@ -190,7 +207,8 @@ local function sampleTile( uid, size )
 			assetParts[#assetParts + 1] = encodeAsset(
 				index,
 				offsetX * CELL + object.pos.x,
-				offsetY * CELL + object.pos.y
+				offsetY * CELL + object.pos.y,
+				encodeYaw( object.rot )
 			)
 		end
 	end
@@ -215,6 +233,9 @@ local function sampleTile( uid, size )
 		color = table.concat( colorParts ),
 		height = table.concat( heightParts ),
 		assetPalette = palette,
+		-- Characters per asset. Named rather than inferred: 9 and 11 are both
+		-- divisible into plausible stream lengths, so guessing is ambiguous.
+		assetStride = 11,
 		assets = table.concat( assetParts ),
 		assetCount = #assetParts,
 		minHeight = minHeight,

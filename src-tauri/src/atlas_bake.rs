@@ -120,6 +120,8 @@ struct BakedTileFile {
     asset_palette: Option<Vec<String>>,
     #[serde(default)]
     assets: Option<String>,
+    #[serde(default, deserialize_with = "lua_span")]
+    asset_stride: usize,
 }
 
 /// Decodes the clutter raster: one two-digit index per sample into the game's
@@ -162,28 +164,46 @@ pub struct PlacedAsset {
     pub palette_index: usize,
     pub x: f32,
     pub y: f32,
+    /// Yaw in radians. Zero for a stream baked before the angle was recorded.
+    pub yaw: f32,
 }
 
 /// Decodes the baker's asset stream: palette index, x and y, three hex digits
 /// each, with the coordinates in quarter-metres.
-fn decode_assets(text: &str) -> Result<Vec<PlacedAsset>, String> {
+fn decode_assets(text: &str, stride: usize) -> Result<Vec<PlacedAsset>, String> {
     if text.is_empty() {
         return Ok(Vec::new());
     }
-    if !text.len().is_multiple_of(9) {
-        return Err(format!("asset stream length {} is not a multiple of 9", text.len()));
+    // The baker names its stride rather than leaving it to be inferred: 9 and
+    // 11 both divide plausible stream lengths, so guessing is ambiguous.
+    let stride = if stride == 11 { 11 } else { 9 };
+    if !text.len().is_multiple_of(stride) {
+        return Err(format!(
+            "asset stream length {} is not a multiple of {stride}",
+            text.len()
+        ));
     }
     let field = |slice: &str| usize::from_str_radix(slice, 16).map_err(|_| "bad hex".to_owned());
-    let mut placed = Vec::with_capacity(text.len() / 9);
-    for chunk in text.as_bytes().chunks_exact(9) {
+    let mut placed = Vec::with_capacity(text.len() / stride);
+    for chunk in text.as_bytes().chunks_exact(stride) {
         let chunk = std::str::from_utf8(chunk).map_err(|_| "asset stream is not ASCII")?;
         placed.push(PlacedAsset {
             palette_index: field(&chunk[0..3])?,
             x: field(&chunk[3..6])? as f32 / 4.0,
             y: field(&chunk[6..9])? as f32 / 4.0,
+            yaw: if stride == 11 {
+                field(&chunk[9..11])? as f32 / 256.0 * std::f32::consts::TAU
+            } else {
+                0.0
+            },
         });
     }
     Ok(placed)
+}
+
+#[cfg(test)]
+fn decode_assets_legacy(text: &str) -> Result<Vec<PlacedAsset>, String> {
+    decode_assets(text, 9)
 }
 
 /// Paints placed objects over the finished terrain.
@@ -249,6 +269,23 @@ pub fn draw_assets(
         let centre_y = span as f32 - asset.y * pixels_per_metre;
         let opacity = info.kind.opacity();
 
+        // A building is a building shape. A disc is right for a tree canopy and
+        // wrong for a warehouse, and the collision mesh knows the difference --
+        // it is where the radius came from in the first place.
+        if draws_as_a_shape(info.kind) && info.footprint.len() >= 3 {
+            fill_footprint(
+                rgba,
+                span,
+                &info.footprint,
+                [centre_x, centre_y],
+                asset.yaw,
+                pixels_per_metre,
+                info.color,
+                opacity,
+            );
+            continue;
+        }
+
         let min_x = ((centre_x - radius).floor().max(0.0)) as usize;
         let max_x = ((centre_x + radius).ceil().min(span as f32 - 1.0)) as usize;
         let min_y = ((centre_y - radius).floor().max(0.0)) as usize;
@@ -272,6 +309,100 @@ pub fn draw_assets(
                     rgba[offset + channel] =
                         (existing * (1.0 - alpha) + target * alpha).clamp(0.0, 255.0) as u8;
                 }
+            }
+        }
+    }
+}
+
+/// Whether this kind reads better as its outline than as a blob.
+///
+/// Foliage does not: a canopy really is a soft circle from above, and a tree's
+/// collision hull is a scrappy polygon that would look worse.
+fn draws_as_a_shape(kind: AssetKind) -> bool {
+    matches!(kind, AssetKind::Building | AssetKind::Wreck | AssetKind::Rock)
+}
+
+/// Fills a rotated outline, with a darker edge so adjoining buildings stay
+/// legible as separate ones rather than merging into a slab.
+#[allow(clippy::too_many_arguments)]
+fn fill_footprint(
+    rgba: &mut [u8],
+    span: usize,
+    footprint: &[[f32; 2]],
+    centre: [f32; 2],
+    yaw: f32,
+    pixels_per_metre: f32,
+    color: [u8; 3],
+    opacity: f32,
+) {
+    let (sin, cos) = yaw.sin_cos();
+    let points: Vec<[f32; 2]> = footprint
+        .iter()
+        .map(|[x, y]| {
+            let rx = x * cos - y * sin;
+            let ry = x * sin + y * cos;
+            // Rows run north to south while asset coordinates count northward.
+            [
+                centre[0] + rx * pixels_per_metre,
+                centre[1] - ry * pixels_per_metre,
+            ]
+        })
+        .collect();
+
+    let (mut min_x, mut max_x) = (f32::MAX, f32::MIN);
+    let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
+    for point in &points {
+        min_x = min_x.min(point[0]);
+        max_x = max_x.max(point[0]);
+        min_y = min_y.min(point[1]);
+        max_y = max_y.max(point[1]);
+    }
+    if !(max_x - min_x > 1.0 && max_y - min_y > 1.0) {
+        return;
+    }
+
+    let inside = |px: f32, py: f32| {
+        // Even-odd crossing count. The hull is convex, but this does not care
+        // and costs nothing extra at these sizes.
+        let mut hit = false;
+        let mut j = points.len() - 1;
+        for i in 0..points.len() {
+            let (a, b) = (points[i], points[j]);
+            if (a[1] > py) != (b[1] > py) {
+                let cut = (b[0] - a[0]) * (py - a[1]) / (b[1] - a[1]) + a[0];
+                if px < cut {
+                    hit = !hit;
+                }
+            }
+            j = i;
+        }
+        hit
+    };
+
+    let x0 = min_x.floor().max(0.0) as usize;
+    let x1 = (max_x.ceil().min(span as f32 - 1.0)).max(0.0) as usize;
+    let y0 = min_y.floor().max(0.0) as usize;
+    let y1 = (max_y.ceil().min(span as f32 - 1.0)).max(0.0) as usize;
+
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            if !inside(px, py) {
+                continue;
+            }
+            // A pixel with a neighbour outside is a rim pixel, and gets a
+            // darker shade so two buildings side by side still read as two.
+            let rim = !inside(px - 1.0, py)
+                || !inside(px + 1.0, py)
+                || !inside(px, py - 1.0)
+                || !inside(px, py + 1.0);
+            let shade = if rim { 0.72 } else { 1.0 };
+            let offset = (y * span + x) * 4;
+            for channel in 0..3 {
+                let existing = f32::from(rgba[offset + channel]);
+                let target = f32::from(color[channel]) * shade;
+                rgba[offset + channel] =
+                    (existing * (1.0 - opacity) + target * opacity).clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -566,13 +697,13 @@ fn convert_one(
 
     // Trees, rocks, buildings and the crashed ship are assets rather than
     // terrain, so nothing above sees them.
-    let placed = decode_assets(tile.assets.as_deref().unwrap_or_default())?;
+    let placed = decode_assets(tile.assets.as_deref().unwrap_or_default(), tile.asset_stride)?;
     if !placed.is_empty() {
         let palette: Vec<Option<AssetInfo>> = tile
             .asset_palette
             .unwrap_or_default()
             .iter()
-            .map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()).copied())
+            .map(|uuid| catalogue.get(&uuid.to_ascii_lowercase()).cloned())
             .collect();
         let tile_metres = (tile.size.max(1) as f32) * 64.0;
         let pixels_per_metre = render_span as f32 / tile_metres;
@@ -966,6 +1097,7 @@ mod tests {
             kind,
             color,
             radius,
+            footprint: Vec::new(),
             height: 0.0,
         })
     }
@@ -973,14 +1105,14 @@ mod tests {
     #[test]
     fn asset_stream_decodes_palette_and_quarter_metre_positions() {
         // index 1, x = 0x008 quarter-metres = 2 m, y = 0x010 = 4 m.
-        let placed = decode_assets("001008010").unwrap();
+        let placed = decode_assets_legacy("001008010").unwrap();
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].palette_index, 1);
         assert!((placed[0].x - 2.0).abs() < 0.001);
         assert!((placed[0].y - 4.0).abs() < 0.001);
 
-        assert!(decode_assets("").unwrap().is_empty());
-        assert!(decode_assets("0010080").is_err(), "ragged stream must fail");
+        assert!(decode_assets_legacy("").unwrap().is_empty());
+        assert!(decode_assets_legacy("0010080").is_err(), "ragged stream must fail");
     }
 
     #[test]
@@ -993,6 +1125,7 @@ mod tests {
             palette_index: 0,
             x: 16.0,
             y: 16.0,
+            yaw: 0.0,
         }];
         draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
 
@@ -1010,6 +1143,7 @@ mod tests {
             palette_index: 0,
             x: 8.0,
             y: 8.0,
+            yaw: 0.0,
         }];
         draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
         assert!(
@@ -1026,6 +1160,7 @@ mod tests {
             palette_index: 0,
             x: 8.0,
             y: 8.0,
+            yaw: 0.0,
         }];
 
         // Seaplants and lily pads sit in open water and read as floating trees.
@@ -1073,6 +1208,7 @@ mod tests {
             palette_index: 7,
             x: 4.0,
             y: 4.0,
+            yaw: 0.0,
         }];
         draw_assets(&mut rgba, span, &placed, &palette, 1.0, &[], 0, 0.0);
         assert!(rgba.iter().all(|&value| value == 255));
@@ -1256,6 +1392,63 @@ mod tests {
             "color": hex_u16(&color),
             "height": hex_u16(&height),
         })
+    }
+
+    #[test]
+    fn a_building_is_drawn_as_its_outline_and_turned_with_its_placement() {
+        // An L, so a rotation is visible in the result rather than symmetric.
+        let footprint = vec![[-4.0, -2.0], [4.0, -2.0], [4.0, 2.0], [-4.0, 2.0]];
+        let info = AssetInfo {
+            kind: AssetKind::Building,
+            color: [255, 0, 0],
+            radius: 4.0,
+            footprint,
+            height: 8.0,
+        };
+        let render = |yaw: f32| {
+            let mut rgba = vec![0_u8; 64 * 64 * 4];
+            draw_assets(
+                &mut rgba,
+                64,
+                &[PlacedAsset { palette_index: 0, x: 32.0, y: 32.0, yaw }],
+                &[Some(info.clone())],
+                1.0,
+                &[],
+                0,
+                64.0,
+            );
+            rgba
+        };
+
+        let flat = render(0.0);
+        let turned = render(std::f32::consts::FRAC_PI_2);
+        let painted = |rgba: &[u8]| rgba.chunks_exact(4).filter(|p| p[0] > 60).count();
+
+        // Eight by four metres, so about 32 pixels either way round.
+        assert!(painted(&flat) > 20, "nothing drawn: {}", painted(&flat));
+        assert_eq!(
+            painted(&flat),
+            painted(&turned),
+            "a quarter turn should paint the same area"
+        );
+
+        // Wide when flat, tall when turned -- which is the whole point of
+        // carrying the placement's rotation across from the bake.
+        let extent = |rgba: &[u8], horizontal: bool| {
+            let (mut lo, mut hi) = (usize::MAX, 0);
+            for y in 0..64 {
+                for x in 0..64 {
+                    if rgba[(y * 64 + x) * 4] > 60 {
+                        let v = if horizontal { x } else { y };
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+            }
+            hi.saturating_sub(lo)
+        };
+        assert!(extent(&flat, true) > extent(&flat, false), "flat should be wide");
+        assert!(extent(&turned, false) > extent(&turned, true), "turned should be tall");
     }
 
     #[test]

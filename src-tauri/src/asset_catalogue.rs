@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const CATALOGUE_FILE: &str = "asset-catalogue.json";
-const CATALOGUE_VERSION: u32 = 3;
+const CATALOGUE_VERSION: u32 = 4;
 /// Collision meshes are metres; nothing legitimate is wider than a tile.
 const MAX_RADIUS: f32 = 64.0;
 /// Nothing placed on a tile is taller than this; a larger reading is a mesh
@@ -213,12 +213,13 @@ const MESH_UNITS_PER_METRE: f32 = 10.0;
 /// The height is the vertical extent, in the same units. The POI photography
 /// sweep uses it to decide how far back the camera has to go: something as tall
 /// as the camera is high leans right out over the tile in a top-down frame.
-fn extent_from_obj(path: &Path) -> Option<(f32, f32)> {
+fn extent_from_obj(path: &Path) -> Option<(f32, f32, Vec<[f32; 2]>)> {
     let text = fs::read_to_string(path).ok()?;
     let (mut min_x, mut max_x) = (f32::MAX, f32::MIN);
     let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
     let (mut min_z, mut max_z) = (f32::MAX, f32::MIN);
     let mut seen = 0_u32;
+    let mut plan: Vec<[f32; 2]> = Vec::new();
 
     for line in text.lines() {
         let mut parts = line.split_ascii_whitespace();
@@ -238,6 +239,7 @@ fn extent_from_obj(path: &Path) -> Option<(f32, f32)> {
         max_x = max_x.max(x);
         min_y = min_y.min(y);
         max_y = max_y.max(y);
+        plan.push([x, y]);
         // A mesh without a parseable third component still contributes its
         // footprint; it just does not contribute a height.
         if let Some(z) = parts.next().and_then(|value| value.parse::<f32>().ok()) {
@@ -258,7 +260,70 @@ fn extent_from_obj(path: &Path) -> Option<(f32, f32)> {
     } else {
         0.0
     };
-    (radius > 0.0).then(|| (radius.min(MAX_RADIUS), height))
+
+    // The outline, in metres about the mesh's own centre, so the renderer can
+    // draw a warehouse as a warehouse instead of a circle. A hull rather than
+    // the raw vertices: collision meshes carry interior geometry that says
+    // nothing about the silhouette, and the hull of a few thousand points is
+    // typically a dozen.
+    let centre = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0];
+    let footprint = convex_hull(&plan)
+        .into_iter()
+        .map(|[x, y]| {
+            [
+                (x - centre[0]) / MESH_UNITS_PER_METRE,
+                (y - centre[1]) / MESH_UNITS_PER_METRE,
+            ]
+        })
+        .collect();
+
+    (radius > 0.0).then(|| (radius.min(MAX_RADIUS), height, footprint))
+}
+
+/// Monotone chain hull. Returns an empty vector for anything degenerate, which
+/// the renderer reads as "no usable outline, draw the disc instead".
+fn convex_hull(points: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let mut sorted = points.to_vec();
+    sorted.sort_by(|a, b| {
+        a[0].partial_cmp(&b[0])
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a[1].partial_cmp(&b[1]).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    sorted.dedup();
+    if sorted.len() < 3 {
+        return Vec::new();
+    }
+
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let mut hull: Vec<[f32; 2]> = Vec::with_capacity(sorted.len() + 1);
+    for pass in 0..2 {
+        // The lower chain needs two points before it can turn; the upper one
+        // must not eat into the lower chain already built.
+        let floor = if pass == 0 { 2 } else { hull.len() + 1 };
+        let iter: Box<dyn Iterator<Item = &[f32; 2]>> = if pass == 0 {
+            Box::new(sorted.iter())
+        } else {
+            Box::new(sorted.iter().rev())
+        };
+        for &point in iter {
+            while hull.len() >= floor && cross(hull[hull.len() - 2], hull[hull.len() - 1], point) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(point);
+        }
+        hull.pop();
+    }
+    if hull.len() < 3 {
+        Vec::new()
+    } else {
+        hull
+    }
 }
 
 /// Resolves the game's `$SURVIVAL_DATA` / `$GAME_DATA` path variables.
@@ -273,11 +338,16 @@ fn resolve_game_path(game_root: &Path, raw: &str) -> Option<PathBuf> {
     Some(base.join(rest.replace('/', std::path::MAIN_SEPARATOR_STR)))
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssetInfo {
     pub kind: AssetKind,
     pub color: [u8; 3],
     pub radius: f32,
+    /// Outline in metres about the asset's centre, or empty when there is no
+    /// usable one. Buildings are drawn from this; foliage is not, because a
+    /// disc is the honest shape for a canopy.
+    #[serde(default)]
+    pub footprint: Vec<[f32; 2]>,
     /// Vertical extent of the collision mesh, in metres. Zero for anything with
     /// no mesh to measure, which includes every harvestable.
     #[serde(default)]
@@ -409,6 +479,7 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                         kind,
                         color,
                         radius: harvestable_radius(kind, name),
+                        footprint: Vec::new(),
                         // Harvestables have no collision mesh here, and a wood
                         // is not a structure the camera should pull back for.
                         height: 0.0,
@@ -455,8 +526,8 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                     .and_then(Value::as_str)
                     .and_then(|raw| resolve_game_path(game_root, raw))
                     .and_then(|path| extent_from_obj(&path));
-                let (radius, height) =
-                    extent.unwrap_or_else(|| (kind.default_radius(), 0.0));
+                let (radius, height, footprint) =
+                    extent.unwrap_or_else(|| (kind.default_radius(), 0.0, Vec::new()));
 
                 catalogue.insert(
                     uuid.to_ascii_lowercase(),
@@ -464,6 +535,7 @@ fn build(game_root: &Path) -> HashMap<String, AssetInfo> {
                         kind,
                         color,
                         radius,
+                        footprint,
                         height,
                     },
                 );
@@ -641,7 +713,7 @@ mod tests {
             "v -20.0 0.0 0.0\nv 20.0 20.0 900.0\nv 0.0 10.0 5.0\nv ytsaq garbage\nf 1 2 3\n",
         )
         .unwrap();
-        let (radius, _) = extent_from_obj(&path).unwrap();
+        let (radius, _, _) = extent_from_obj(&path).unwrap();
         assert!((radius - 2.0).abs() < 0.001, "got {radius}");
         fs::remove_dir_all(&directory).ok();
     }
@@ -658,7 +730,7 @@ mod tests {
             "v 500.0 0.0 0.0\nv 510.0 10.0 0.0\nv 505.0 5.0 1.0\n",
         )
         .unwrap();
-        let (radius, _) = extent_from_obj(&path).unwrap();
+        let (radius, _, _) = extent_from_obj(&path).unwrap();
         assert!((radius - 0.5).abs() < 0.001, "got {radius}");
         fs::remove_dir_all(&directory).ok();
     }
