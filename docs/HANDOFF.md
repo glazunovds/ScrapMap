@@ -221,6 +221,34 @@ Three changes:
 A stopped sweep logs `SCRAPMAP_SHOT_V1|stopped|<reason>` rather than `done`, so
 ScrapMap leaves the request in place and the run stays resumable.
 
+## The run that worked
+
+`begin|116` → `godmode|true` → `done|116` → `godmode|false`. Clean, complete, and
+the player finished it alive: `hp=30/100` on all 115 logged shots, unchanged from
+the value they started with. 25 rescues fired, so the fall watchdog is carrying
+real weight rather than sitting idle.
+
+Measured over the 116 photographs:
+
+| | |
+|---|---|
+| Black bands | none |
+| Sky frames | none |
+| Pull-backs engaged | 15, exactly as predicted offline |
+| Accepted and recorded | 107 of 116 |
+
+**There is no sky in the set.** Seven frames are bright and low-contrast, which a
+"bright and flat means sky" rule would have thrown away — but their blue-minus-red
+runs from −2 to −55, meaning red-dominant, and inspecting one shows desert and
+rock. Do not add that guard; it would delete good desert tiles.
+
+Nine tiles are still outstanding, all rejected by the capture guards: eighteen
+rejections read `detail 0.0–3.7` (an essentially uniform frame) and one is a
+Windows `invalid window handle`. A perfectly uniform frame is not terrain and not
+sky, which points at the capture landing while the window was mid-transition
+rather than at the framing. `remaining_targets` will offer exactly those nine on
+the next prepare.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** The fix is to rotate the captured
