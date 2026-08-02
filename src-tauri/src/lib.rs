@@ -450,9 +450,15 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
     // how many targets are missing one rather than letting it pass unnoticed.
     let cache_root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
     let terrain = atlas_bake::tile_terrain(game_root, &cache_root);
-    let targets = poi_capture::build_targets(&layout, &terrain);
-    if targets.is_empty() {
+    let all = poi_capture::build_targets(&layout, &terrain);
+    if all.is_empty() {
         return Err("this world has no points of interest to photograph".to_owned());
+    }
+    // An interrupted sweep resumes rather than starting over.
+    let total = all.len();
+    let targets = poi_capture::remaining_targets(game_root, &cache_root, all);
+    if targets.is_empty() {
+        return Err("every point of interest in this world is already photographed".to_owned());
     }
     let without_ground = targets
         .iter()
@@ -464,6 +470,7 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
     let rotated = targets.iter().filter(|target| target.rotation != 0).count();
     Ok(serde_json::json!({
         "targets": targets.len(),
+        "alreadyPhotographed": total - targets.len(),
         "withoutGroundHeight": without_ground,
         "rotatedPlacements": rotated,
         "note": "reload the survival world to run the sweep",
@@ -878,7 +885,22 @@ fn start_diagnostic_source(app: AppHandle) -> Result<(), String> {
                                     .and_then(|root| {
                                         poi_capture::capture_tile(window, &uuid, crop, &root)
                                     }) {
-                                    Ok(_) => photographed.push(uuid),
+                                    Ok(_) => {
+                                        // Published now rather than at the end:
+                                        // a sweep that is interrupted should
+                                        // still leave behind what it captured.
+                                        if let Some(root) = atlas_bake::atlas_root() {
+                                            if let Err(error) = poi_capture::publish_photos(
+                                                &root,
+                                                std::slice::from_ref(&uuid),
+                                            ) {
+                                                eprintln!(
+                                                    "ScrapMap could not publish {uuid}: {error}"
+                                                );
+                                            }
+                                        }
+                                        photographed.push(uuid);
+                                    }
                                     Err(error) => {
                                         eprintln!("ScrapMap could not photograph {uuid}: {error}")
                                     }

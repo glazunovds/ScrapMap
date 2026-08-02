@@ -151,6 +151,35 @@ pub fn build_targets(
     chosen.into_values().collect()
 }
 
+/// Drops targets already photographed since the outstanding request was written.
+///
+/// A sweep is fifteen minutes with the player's controls locked, and dying part
+/// way through used to cost the whole run: the request is only cleared when Lua
+/// reports `done`, so the next load started again from the first tile. Comparing
+/// each photograph against the request it was taken for turns a second run into
+/// a resumption -- and leaves a completed sweep alone, because by then the
+/// request is gone and every target is offered afresh.
+pub fn remaining_targets(
+    game_root: &Path,
+    atlas_root: &Path,
+    targets: Vec<CaptureTarget>,
+) -> Vec<CaptureTarget> {
+    let request = game_root.join("Survival").join(REQUEST_FILE);
+    let Some(requested_at) = fs::metadata(&request).and_then(|data| data.modified()).ok() else {
+        return targets;
+    };
+    let directory = atlas_root.join("tiles").join(PHOTO_DIRECTORY);
+    targets
+        .into_iter()
+        .filter(|target| {
+            let photo = directory.join(format!("{}.png", target.uuid.to_ascii_lowercase()));
+            !fs::metadata(&photo)
+                .and_then(|data| data.modified())
+                .is_ok_and(|taken| taken >= requested_at)
+        })
+        .collect()
+}
+
 /// Leaves the sweep request where Lua will find it on the next world load.
 pub fn write_request(game_root: &Path, targets: &[CaptureTarget]) -> Result<PathBuf, String> {
     let path = game_root.join("Survival").join(REQUEST_FILE);

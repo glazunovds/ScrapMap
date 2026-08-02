@@ -72,6 +72,28 @@ reused elsewhere in the world where the rest of the building is not there.
 So "corner of the building", "part of the acid pool" and "cut POI" from the
 *sides* are all expected. Only cut from the top and bottom was a bug.
 
+## The first run with the fixes: 49 of 116, then the player died
+
+Confirmed working from the log — `probed` reads `atlas` throughout, `covered`
+exceeds `metres` where a structure was found (77.40 against 64.00, a 1.21×
+pull-back, structure 16.8 m), and clearance sits at a steady 141 m so the perch
+holds. No `travel refused`, no `slow`.
+
+The death itself is not visible in the log and its cause is unknown. What the
+run did expose is that dying was expensive: photographs were only published when
+Lua reported `done`, and the request was only cleared then too, so an interrupted
+sweep put nothing on the map and started again from the first tile.
+
+Both are fixed. Each photograph is published as it is taken, and
+`remaining_targets` drops targets already photographed since the outstanding
+request was written — so pressing prepare again after an interruption resumes
+instead of restarting. A completed sweep is unaffected, because by then the
+request is gone and every target is offered afresh.
+
+A sweep still leaves the player helpless for fifteen minutes with locked
+controls. If deaths keep happening, that is the thing to attack: either shorten
+the exposure or accept `/godmode` as a documented precondition.
+
 ## Open questions
 
 **The 33 tiles with no unrotated placement.** The fix is to rotate the captured
