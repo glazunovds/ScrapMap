@@ -35,3 +35,7 @@ public/map/runtime-data.local.js
 *.njsproj
 *.sln
 *.sw?
+
+# The full-resolution screen recording. The lighter one beside it is what
+# ships in the README; this stays local so it never enters the history.
+screenshots/minimap-full.gif

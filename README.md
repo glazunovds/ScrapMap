@@ -16,6 +16,11 @@ overlay, Steam, portable, no Cheat Engine.
 ![The full map: baked terrain, roads, water, and points of interest by
 category, with the world overview panel on the right](screenshots/full-map.png)
 
+The compact minimap, pinned to the game window and following the player:
+
+![The compact minimap tracking the player, with a named marker
+nearby](screenshots/minimap.gif)
+
 | | |
 |---|---|
 | Game | Scrap Mechanic **1.0.4.874**, Survival, Windows x64 |
