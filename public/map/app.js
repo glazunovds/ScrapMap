@@ -20,6 +20,19 @@
   const poiTypeName = (record) =>
     record?.nameKey ? tr(record.nameKey, record.name) : record?.name || "";
 
+  /**
+   * A point-of-interest name in the active language.
+   *
+   * The layout carries the generator's own code -- `POI_ROAD_KIOSK` -- because
+   * that is what the game calls it, and the map showed exactly that. The
+   * dictionary key is derived from the code, and an unnamed code falls back to
+   * the code read as words rather than to the code itself.
+   */
+  const poiName = (poi) =>
+    poi?.labelKey
+      ? tr(poi.labelKey, poi.labelFallback || poi.label)
+      : poi?.label || "";
+
   /** A terrain name in the active language. Same shape as categoryLabel. */
   const terrainLabel = (style) =>
     style?.labelKey ? tr(style.labelKey, style.label) : style?.label || "";
@@ -1808,7 +1821,23 @@
     if (!state.expanded) setExpanded(true);
     invalidateStaticFrame();
     scheduleRender();
-    showToast(`${record.name} · ${point.x} : ${point.y}`);
+    showToast(`${poiTypeName(record)} · ${point.x} : ${point.y}`);
+  }
+
+  /**
+   * Folds the translated names into the search index.
+   *
+   * `map-core` builds the catalogue and has no dictionary, so without this a
+   * Russian panel searched only English names and generator codes -- you could
+   * see "Придорожный киоск" on the map and fail to find it by typing it.
+   */
+  function indexTranslatedPoiNames() {
+    state.poiCatalog.forEach((record) => {
+      const translated = poiTypeName(record).toLocaleLowerCase();
+      if (translated && !record.searchText.includes(translated)) {
+        record.searchText += ` ${translated}`;
+      }
+    });
   }
 
   function renderPoiSearch() {
@@ -2111,12 +2140,18 @@
       state.localMarkers.splice(existingIndex, 1);
       showToast(tr("TOAST_MARKER_REMOVED").replace("{cell}", `${cellX}:${cellY}`));
     } else {
+      // Named after whatever it is put on. A list of "Marker -7:-32" tells you
+      // nothing; "Roadside kiosk -7:-32" is why you placed it.
+      const poi = cellPoi(state.layout.cellsByKey.get(Core.cellKey(cellX, cellY)));
+      const place = poi ? poiName(poi) : "";
       state.localMarkers.push({
         id: `local-${Date.now()}-${cellX}-${cellY}`,
         cellX,
         cellY,
         kind: "x",
-        label: tr("TOAST_CELL_VISITED").replace("{cell}", `${cellX}:${cellY}`),
+        label: place
+          ? `${place} ${cellX}:${cellY}`
+          : tr("MARKER_DEFAULT_NAME").replace("{cell}", `${cellX}:${cellY}`),
         createdAt: new Date().toISOString(),
         local: true
       });
@@ -2230,7 +2265,7 @@
     elements.hoverCoordinates.textContent = `${cell.x} : ${cell.y}`;
     elements.hoverTitle.textContent = visible
       ? poi
-        ? poi.label
+        ? poiName(poi)
         : terrainLabel(style)
       : tr("MAP_HOVER_UNEXPLORED");
     elements.hoverDetails.textContent = visible
@@ -2347,6 +2382,7 @@
     state.layout = layout;
     state.importedMarkers = [];
     state.poiCatalog = Core.buildPoiCatalog(layout);
+    indexTranslatedPoiNames();
     state.poiTargetId = null;
     state.poiTargetCellKeys.clear();
     if (changedWorld) {

@@ -401,6 +401,32 @@
     });
   }
 
+  /**
+   * A readable name for a generator code, without a dictionary.
+   *
+   * The game names its points of interest `POI_ROAD_KIOSK`, and that is what
+   * the layout export carries through, so the map used to label a kiosk
+   * `POI_ROAD_KIOSK`. Translations live under `POI_NAME_<rest of the code>`;
+   * this is what a code with no entry falls back to, which is still a name.
+   */
+  function poiCodeLabel(code) {
+    const text = String(code || "")
+      .replace(/^POI_/, "")
+      .replaceAll("_", " ")
+      .trim()
+      .toLowerCase();
+    if (!text) {
+      return "";
+    }
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  /** The dictionary key for a generator code, or null if it is not one. */
+  function poiLabelKey(code) {
+    const text = String(code || "");
+    return /^POI_[A-Z0-9_]+$/.test(text) ? `POI_NAME_${text.slice(4)}` : null;
+  }
+
   function normalizePoi(poi) {
     if (!poi) {
       return null;
@@ -415,10 +441,13 @@
     }
 
     const kind = String(poi.kind || poi.type || poi.id || "poi");
+    const code = poi.code == null ? null : String(poi.code);
     return {
       kind,
       label: String(poi.label || poi.name || kind),
-      code: poi.code == null ? null : String(poi.code),
+      labelKey: poiLabelKey(code),
+      labelFallback: poiCodeLabel(code) || null,
+      code,
       category: poi.category == null ? null : String(poi.category).toLowerCase(),
       poiId: poi.poiId == null
         ? (poi.id == null ? null : String(poi.id))
@@ -460,8 +489,16 @@
           : `cell:${kind}:${cell.x},${cell.y}`;
       let record = records.get(id);
       if (!record) {
+        // A generator code is not a name. Prefer the code's own dictionary
+        // entry, which the renderer resolves, and fall back through the
+        // prettified code before ever showing `POI_ROAD_KIOSK` to anyone.
+        const labelKey = poi.labelKey || poiLabelKey(poi.code);
         const displayName = String(
-          poi.displayName || poi.label || definition.name || kind
+          (labelKey ? poi.labelFallback || poiCodeLabel(poi.code) : "")
+            || poi.displayName
+            || poi.label
+            || definition.name
+            || kind
         );
         record = {
           id,
@@ -469,6 +506,7 @@
           groupId,
           kind,
           category: String(poi.category || "landmark").toLowerCase(),
+          nameKey: labelKey,
           name: displayName,
           nameEn: definition.nameEn,
           aliases: Array.from(new Set([

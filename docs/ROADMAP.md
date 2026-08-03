@@ -106,10 +106,17 @@ against the code, and two things it promised were wrong: that the map works
 without the patch (it does not -- the patch exports the layout), and that a new
 language needs no Rust change (it needs three).
 
-What remains before publishing: screenshots of the English interface, a version
-tag, and a look at whether the panel still offers things that no longer earn
-their place -- the photography button most of all, now that eleven photographs
-are kept out of a hundred and sixteen taken.
+The photography button is gone from the panel -- hidden, not deleted, with the
+Rust and Lua sides intact and a comment in `index.html` saying how to put it
+back. Eleven photographs out of a hundred and sixteen were worth keeping, and
+the sweep costs a quarter of an hour of held controls and god mode to run.
+
+Points of interest are named rather than coded. The layout carries the game's
+own `POI_ROAD_KIOSK`, and that is what the map used to show; all seventy-three
+codes this world contains now have English and Russian names, and a code with
+no entry reads as words rather than as a constant.
+
+What remains before publishing: a version tag, and a push.
 
 ### Housekeeping
 

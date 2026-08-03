@@ -13,6 +13,9 @@ locations, waypoints, markers, world map, tile atlas, player coordinates,
 multiplayer player positions, co-op, warehouse and trader finder, Windows
 overlay, Steam, portable, no Cheat Engine.
 
+![The full map: baked terrain, roads, water, and points of interest by
+category, with the world overview panel on the right](screenshots/full-map.png)
+
 | | |
 |---|---|
 | Game | Scrap Mechanic **1.0.4.874**, Survival, Windows x64 |

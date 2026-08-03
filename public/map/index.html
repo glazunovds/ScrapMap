@@ -118,7 +118,16 @@
             </button>
             <small data-i18n="SESSION_REVEAL_ALL_NOTE">Marks every cell visited. Fog stays switched on.</small>
           </div>
-          <div class="fog-actions">
+          <!--
+            The photography sweep is deliberately not offered here. It flies the
+            camera over every point of interest for a quarter of an hour, holds
+            your controls, and turns god mode on to survive it -- and eleven of
+            a hundred and sixteen photographs were worth keeping, because the
+            generated tiles draw the map better than the camera photographs it.
+            The Rust and Lua sides still work; see docs/HANDOFF.md. Restore this
+            block and the listener in app.js to put it back.
+          -->
+          <div class="fog-actions" id="poiCaptureActions" hidden>
             <button id="poiCaptureButton" type="button" class="button button-ghost">
               <span data-i18n="SESSION_PHOTOGRAPH_POI">Photograph points of interest</span>
             </button>
