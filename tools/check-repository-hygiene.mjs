@@ -135,6 +135,35 @@ for (const absolutePath of await collectFiles(root)) {
   }
 }
 
+// A rule written against a class nothing carries is silently dead, and it
+// reads exactly like a rule that works. The compact overlay hid
+// `.hover-highlight` while the element was `.map-hover-cell`, so the rule
+// never applied and the hover square kept painting over the minimap.
+{
+  const styles = ["public/map/styles.css", "public/map/overlay.css"];
+  const consumers = ["public/map/index.html", "public/map/app.js", "public/map/overlay-bridge.js"];
+  let carried = "";
+  for (const relative of consumers) {
+    carried += await fs.readFile(new URL(`../${relative}`, import.meta.url), "utf8");
+  }
+
+  for (const relative of styles) {
+    const sheet = await fs.readFile(new URL(`../${relative}`, import.meta.url), "utf8");
+    // Selectors only: a class name inside a declaration block would be a value.
+    const selectors = sheet
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\{[^{}]*\}/g, "{}");
+    const names = new Set(
+      Array.from(selectors.matchAll(/\.(-?[A-Za-z_][\w-]*)/g), ([, name]) => name),
+    );
+    for (const name of names) {
+      if (!new RegExp(`\\b${name}\\b`).test(carried)) {
+        violations.push(`${relative}: .${name} matches nothing in the markup or the renderer`);
+      }
+    }
+  }
+}
+
 if (violations.length > 0) {
   process.stderr.write(
     `Repository hygiene check failed:\n${violations

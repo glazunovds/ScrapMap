@@ -218,8 +218,9 @@
     pixelRatio: 1,
     canvasWidth: 1,
     canvasHeight: 1,
-    hoverCell: null,
+    hoverCellKey: null,
     pointer: { x: 0, y: 0 },
+    pointerInside: false,
     hoverPositionQueued: false,
     telemetryLive: false,
     telemetryStale: false,
@@ -420,17 +421,17 @@
     };
   }
 
-  function screenToGrid(screenX, screenY) {
-    const camera = getCamera();
-    const scale = getScale();
+  function screenToGrid(screenX, screenY, view) {
+    const camera = view ? view.camera : getCamera();
+    const scale = view ? view.scale : getScale();
     return {
       x: camera.x + (screenX - state.canvasWidth / 2) / scale,
       y: camera.y - (screenY - state.canvasHeight / 2) / scale
     };
   }
 
-  function screenToCell(screenX, screenY) {
-    const grid = screenToGrid(screenX, screenY);
+  function screenToCell(screenX, screenY, view) {
+    const grid = screenToGrid(screenX, screenY, view);
     return { x: Math.floor(grid.x), y: Math.floor(grid.y) };
   }
 
@@ -1329,7 +1330,7 @@
       String(state.renderStats.staticHits);
     elements.canvas.dataset.lastStaticBuildCellDrawCalls =
       String(state.renderStats.lastStaticBuildCellDrawCalls);
-    positionHoverHighlight(view);
+    refreshHover(view);
     elements.zoomLabel.textContent = tr("MAP_SCALE").replace("{value}", Math.round((view.scale / 43) * 100));
   }
 
@@ -2098,7 +2099,7 @@
       : state.expanded
         ? tr("MAP_HINT_PAN_ZOOM")
         : tr("MAP_HINT_DOUBLE_CLICK");
-    positionHoverHighlight();
+    refreshHover();
   }
 
   function toggleMarker(cellX, cellY) {
@@ -2145,10 +2146,23 @@
     });
   }
 
-  function positionHoverHighlight(view) {
-    const cell = state.hoverCell && state.layout
-      ? state.layout.cellsByKey.get(state.hoverCell.key)
-      : null;
+  /**
+   * The cell under the pointer, worked out from the view being drawn.
+   *
+   * Deliberately not cached: anything that moves the map without moving the
+   * mouse -- the zoom buttons, a keyboard pan, the compact map following the
+   * player -- changes which cell is under the cursor, and a cached one left the
+   * highlight sitting on a square the pointer was nowhere near.
+   */
+  function hoveredCell(view) {
+    if (!state.pointerInside || !state.layout) {
+      return null;
+    }
+    const position = screenToCell(state.pointer.x, state.pointer.y, view);
+    return state.layout.cellsByKey.get(Core.cellKey(position.x, position.y)) || null;
+  }
+
+  function positionHoverHighlight(cell, view) {
     if (!cell) {
       elements.hoverHighlight.hidden = true;
       return;
@@ -2169,52 +2183,101 @@
     elements.hoverHighlight.hidden = false;
   }
 
-  function updateHover(event) {
-    const bounds = elements.canvas.getBoundingClientRect();
-    state.pointer.x = event.clientX - bounds.left;
-    state.pointer.y = event.clientY - bounds.top;
-    const cellPosition = screenToCell(state.pointer.x, state.pointer.y);
-    const cell = state.layout
-      ? state.layout.cellsByKey.get(Core.cellKey(cellPosition.x, cellPosition.y))
-      : null;
-    const nextHoverCell = cell || {
-      x: cellPosition.x,
-      y: cellPosition.y,
-      key: Core.cellKey(cellPosition.x, cellPosition.y)
-    };
-    const hoverChanged = !state.hoverCell || state.hoverCell.key !== nextHoverCell.key;
-    state.hoverCell = nextHoverCell;
+  // Rebuilt lazily whenever the layout object changes, which saves hooking
+  // every path that can replace a layout.
+  const poiByGroup = { layout: null, entries: new Map() };
 
-    if (!state.layout || !cell) {
+  /**
+   * The point of interest a cell belongs to, not just the one it carries.
+   *
+   * `normalizeLayout` keeps the POI on the tile's origin cell and clears it on
+   * every other offset, so a warehouse spanning 4x4 cells named itself in one
+   * corner and reported plain terrain in the other fifteen. Structures here run
+   * up to 16x16 cells, which made the tooltip look broken rather than precise.
+   */
+  function cellPoi(cell) {
+    if (!cell || !state.layout) {
+      return null;
+    }
+    if (cell.poi) {
+      return cell.poi;
+    }
+    const origin = state.layout.cellsByKey.get(
+      Core.cellKey(cell.x - (cell.xOffset || 0), cell.y - (cell.yOffset || 0))
+    );
+    if (origin?.poi) {
+      return origin.poi;
+    }
+    if (!(cell.groupId > 0)) {
+      return null;
+    }
+    if (poiByGroup.layout !== state.layout) {
+      poiByGroup.layout = state.layout;
+      poiByGroup.entries = new Map();
+      state.layout.cells.forEach((candidate) => {
+        if (candidate.poi && candidate.groupId > 0 && !poiByGroup.entries.has(candidate.groupId)) {
+          poiByGroup.entries.set(candidate.groupId, candidate.poi);
+        }
+      });
+    }
+    return poiByGroup.entries.get(cell.groupId) || null;
+  }
+
+  function describeHoveredCell(cell) {
+    const visible = !state.fogEnabled || isVisited(cell);
+    const style = terrainStyle(cell.terrain);
+    const poi = cellPoi(cell);
+    elements.hoverCoordinates.textContent = `${cell.x} : ${cell.y}`;
+    elements.hoverTitle.textContent = visible
+      ? poi
+        ? poi.label
+        : terrainLabel(style)
+      : tr("MAP_HOVER_UNEXPLORED");
+    elements.hoverDetails.textContent = visible
+      ? [
+          poi
+            ? categoryLabel(poiCategories[poi.category] || poiCategories.landmark)
+            : terrainLabel(style),
+          cell.roads.length
+            ? `${tr("MAP_HOVER_ROADS")}: ${cell.roads.length}`
+            : tr("MAP_HOVER_NO_ROAD")
+        ].join(" · ")
+      : tr("MAP_HOVER_FOGGED");
+  }
+
+  /**
+   * Brings the hover card and the cell highlight up to date with the view.
+   *
+   * Called from `render` as well as from the pointer, because the cell under a
+   * stationary cursor changes whenever the map moves beneath it.
+   */
+  function refreshHover(view) {
+    const cell = hoveredCell(view);
+    const key = cell ? cell.key : null;
+    if (key !== state.hoverCellKey) {
+      state.hoverCellKey = key;
+      if (cell) {
+        describeHoveredCell(cell);
+      }
+    }
+
+    if (!cell) {
       elements.hoverCard.hidden = true;
       elements.hoverHighlight.hidden = true;
       return;
     }
 
-    if (hoverChanged) {
-      const visible = !state.fogEnabled || isVisited(cell);
-      const style = terrainStyle(cell.terrain);
-      elements.hoverCoordinates.textContent = `${cell.x} : ${cell.y}`;
-      elements.hoverTitle.textContent = visible
-        ? cell.poi
-          ? cell.poi.label
-          : terrainLabel(style)
-        : tr("MAP_HOVER_UNEXPLORED");
-      elements.hoverDetails.textContent = visible
-        ? [
-            cell.poi
-              ? categoryLabel(poiCategories[cell.poi.category] || poiCategories.landmark)
-              : terrainLabel(style),
-            cell.roads.length
-              ? `${tr("MAP_HOVER_ROADS")}: ${cell.roads.length}`
-              : tr("MAP_HOVER_NO_ROAD")
-          ].join(" · ")
-        : tr("MAP_HOVER_FOGGED");
-      positionHoverHighlight();
-    }
-
+    positionHoverHighlight(cell, view);
     elements.hoverCard.hidden = false;
     scheduleHoverPosition();
+  }
+
+  function updateHover(event) {
+    const bounds = elements.canvas.getBoundingClientRect();
+    state.pointer.x = event.clientX - bounds.left;
+    state.pointer.y = event.clientY - bounds.top;
+    state.pointerInside = true;
+    refreshHover();
   }
 
   function adjustZoom(multiplier, anchorX, anchorY) {
@@ -2944,7 +3007,6 @@
   elements.bundleDrop.addEventListener("drop", (event) => loadFiles(event.dataTransfer.files));
 
   elements.canvas.addEventListener("pointerdown", (event) => {
-    const bounds = elements.canvas.getBoundingClientRect();
     if (state.markerMode) {
       return;
     }
@@ -2972,12 +3034,15 @@
   });
 
   elements.canvas.addEventListener("pointermove", (event) => {
+    // The camera first: hovering resolves against the view the pointer is
+    // actually over, and a drag moves the map under the same event.
+    if (state.drag && state.drag.pointerId === event.pointerId) {
+      const scale = getScale();
+      state.camera.x = state.drag.cameraX - (event.clientX - state.drag.x) / scale;
+      state.camera.y = state.drag.cameraY + (event.clientY - state.drag.y) / scale;
+      scheduleRender();
+    }
     updateHover(event);
-    if (!state.drag || state.drag.pointerId !== event.pointerId) return;
-    const scale = getScale();
-    state.camera.x = state.drag.cameraX - (event.clientX - state.drag.x) / scale;
-    state.camera.y = state.drag.cameraY + (event.clientY - state.drag.y) / scale;
-    scheduleRender();
   });
 
   function endDrag(event) {
@@ -2989,9 +3054,10 @@
   elements.canvas.addEventListener("pointerup", endDrag);
   elements.canvas.addEventListener("pointercancel", endDrag);
   elements.canvas.addEventListener("pointerleave", (event) => {
+    state.pointerInside = false;
     elements.hoverCard.hidden = true;
     elements.hoverHighlight.hidden = true;
-    state.hoverCell = null;
+    state.hoverCellKey = null;
     endDrag(event);
   });
 

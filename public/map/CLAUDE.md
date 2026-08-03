@@ -62,6 +62,14 @@ The generator marks every random lake and roadside patch as a point of
 interest — over six hundred of them. `map-core.js` sorts anything named
 `RANDOM` into the `filler` category, which is off by default.
 
+**Only the tile's origin cell carries the POI.** `normalizeLayout` clears it
+wherever `xOffset`/`yOffset` is non-zero, so a warehouse on a 4×4 tile answers
+`cell.poi` in one corner and `null` in the other fifteen. Anything asking what
+a cell belongs to — hover, search, a future click target — goes through
+`cellPoi`, which walks back to the origin and then to the group. Reading
+`cell.poi` directly is right only for drawing, where one icon per tile is what
+you want.
+
 ## Talking to the host
 
 All `invoke` calls live in `overlay-bridge.js`. The renderer raises DOM events

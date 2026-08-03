@@ -18,7 +18,7 @@ body.scrapmap-overlay.overlay-mini .side-panel,
 body.scrapmap-overlay.overlay-mini .map-chrome-right,
 body.scrapmap-overlay.overlay-mini .map-footer,
 body.scrapmap-overlay.overlay-mini .hover-card,
-body.scrapmap-overlay.overlay-mini .hover-highlight,
+body.scrapmap-overlay.overlay-mini .map-hover-cell,
 body.scrapmap-overlay.overlay-mini .profile-dialog {
   display: none;
 }
