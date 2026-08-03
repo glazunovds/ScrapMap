@@ -181,8 +181,10 @@ pub fn discover_game_root() -> Option<PathBuf> {
 
 /// Where the untouched copies of the stock files are kept.
 ///
-/// Beside the atlas cache rather than in the game directory, so verifying the
-/// game's files through Steam cannot quietly take the baseline with them.
+/// Under `%LOCALAPPDATA%\ScrapMap` rather than in the game directory, so
+/// verifying the game's files through Steam cannot quietly take the baseline
+/// with them -- and deliberately *not* under `atlas\`, which is documented as
+/// disposable and does get deleted to force a re-bake.
 fn baseline_root(cache_root: &Path) -> PathBuf {
     cache_root.join("vanilla")
 }

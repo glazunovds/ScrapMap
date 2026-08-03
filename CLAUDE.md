@@ -13,15 +13,17 @@ commit messages and identifiers are English.
 
 Interface strings live in `public/map/locales/<code>.json`, keyed like
 `SESSION_REVEAL_ALL`. English is the default and the fallback; a key missing
-from a translation falls back to English rather than rendering blank. Adding a
-language is a new file plus an entry in `LANGUAGES` in `public/map/i18n.js` --
-no other code changes. **Do not put literal user-facing text in markup or
-scripts**; add a key.
+from a translation falls back to English rather than rendering blank. **Do not
+put literal user-facing text in markup or scripts**; add a key.
 
-The tray menu is built before a WebView exists, so it reads the same
-dictionaries at compile time through `include_str!` and takes the language from
-`%LOCALAPPDATA%\ScrapMap\language.txt`, which the panel writes. That means the
-tray follows the panel one restart later.
+Adding a language is a new file, an entry in `LANGUAGES` in
+`public/map/i18n.js`, and an entry in `LANGUAGES` in `src-tauri/src/lib.rs`
+beside its two `include_str!` sites. The Rust half is not optional: the tray
+menu is built before a WebView exists, so it reads the dictionaries at compile
+time, and the panel is served them from the binary as well because fetching
+them over the asset protocol failed silently. The language itself lives in
+`%LOCALAPPDATA%\ScrapMap\language.txt` -- **not** under `atlas\`, which is
+disposable -- and the tray rebuilds its own menu when you change it.
 
 ## Layout
 
@@ -139,6 +141,11 @@ handle per-row filters, or it will report convincing nonsense.
 
 Keep the caches disposable. Everything under `%LOCALAPPDATA%\ScrapMap\atlas` can
 be deleted and rebuilt; prefer fixing the generator over patching its output.
+Which means nothing that cannot be rebuilt may live there. Two things did --
+the interface language, and the pristine game scripts `Restore` copies back --
+and deleting the cache to force a re-bake silently took both. They sit in
+`%LOCALAPPDATA%\ScrapMap` now. Check where you are writing before you add a
+third.
 
 ## Safety constraints
 

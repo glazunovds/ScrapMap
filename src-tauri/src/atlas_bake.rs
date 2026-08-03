@@ -507,6 +507,9 @@ pub struct GroundCoverLayer<'a> {
     pub span: usize,
 }
 
+/// One output pixel per sampled one. Only the tests want that now -- the bake
+/// itself renders at `RENDER_SCALE` -- but they read far better for it.
+#[cfg(test)]
 pub fn render_tile_rgba(
     surface: &[u8],
     span: usize,

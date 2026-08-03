@@ -527,10 +527,26 @@ fn poi_capture_prepare(state: State<'_, OverlayState>) -> Result<serde_json::Val
 /// The languages the tray offers, mirroring `LANGUAGES` in `i18n.js`.
 const LANGUAGES: [(&str, &str); 2] = [("en", "English"), ("ru", "Русский")];
 
+/// `%LOCALAPPDATA%\ScrapMap` — settings and the database, not the cache.
+///
+/// Everything under `atlas/` is disposable by design and gets deleted to force
+/// a rebuild, so nothing worth keeping may live there.
+fn data_root() -> Option<PathBuf> {
+    atlas_bake::atlas_root().and_then(|path| path.parent().map(Path::to_path_buf))
+}
+
 /// The interface language, defaulting to English.
 fn current_language() -> String {
-    atlas_bake::atlas_root()
+    // The atlas directory is where this used to be written, which put a setting
+    // inside a cache the user is told to delete. Read the old copy so an
+    // existing install keeps its language; the next change moves it up.
+    let stored = data_root()
         .and_then(|root| fs::read_to_string(root.join("language.txt")).ok())
+        .or_else(|| {
+            atlas_bake::atlas_root()
+                .and_then(|root| fs::read_to_string(root.join("language.txt")).ok())
+        });
+    stored
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| LANGUAGES.iter().any(|(code, _)| code == value))
         .unwrap_or_else(|| "en".to_owned())
@@ -558,18 +574,14 @@ fn tray_text() -> impl Fn(&str) -> String {
     }
 }
 
-/// A tray icon with the things you need when the overlay itself is hidden.
+/// The tray menu in whatever language is currently stored.
 ///
-/// The overlay has no taskbar entry and no window chrome, so before this the
-/// only ways to reach it were global shortcuts you had to already know. The
-/// patch entries matter more: applying and reverting is what a player does
-/// around playing with someone else, and it used to mean a terminal, Node, and
-/// a checkout of this repository.
-fn install_tray(app: &AppHandle) -> Result<(), String> {
-    use tauri::{
-        menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-        tray::TrayIconBuilder,
-    };
+/// Separate from `install_tray` because changing the language rebuilds it: the
+/// labels are baked in at construction, so the menu used to keep the old
+/// language until the next start while the tick had already moved -- which
+/// reads as a broken setting rather than a documented limit.
+fn build_tray_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, String> {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
     let text = tray_text();
 
@@ -590,10 +602,9 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
     let language = Submenu::with_id(app, "language", text("LANGUAGE_TITLE"), true)
         .map_err(|error| error.to_string())?;
     let chosen = current_language();
-    // Kept so the tick can be moved. A CheckMenuItem toggles itself when
-    // clicked and knows nothing about the others, so without this every
-    // language you ever picked stays ticked.
-    let mut language_items = Vec::new();
+    // A CheckMenuItem toggles itself when clicked and knows nothing about the
+    // others, so every language ever picked would stay ticked. Rebuilding the
+    // whole menu on a change settles the ticks as well as the labels.
     for (code, label) in LANGUAGES {
         let item = CheckMenuItem::with_id(
             app,
@@ -605,10 +616,9 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
         language.append(&item).map_err(|error| error.to_string())?;
-        language_items.push((code, item));
     }
 
-    let menu = Menu::with_items(
+    Menu::with_items(
         app,
         &[
             &show,
@@ -622,7 +632,20 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
             &quit,
         ],
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| error.to_string())
+}
+
+/// A tray icon with the things you need when the overlay itself is hidden.
+///
+/// The overlay has no taskbar entry and no window chrome, so before this the
+/// only ways to reach it were global shortcuts you had to already know. The
+/// patch entries matter more: applying and reverting is what a player does
+/// around playing with someone else, and it used to mean a terminal, Node, and
+/// a checkout of this repository.
+fn install_tray(app: &AppHandle) -> Result<(), String> {
+    use tauri::tray::TrayIconBuilder;
+
+    let menu = build_tray_menu(app)?;
 
     let mut tray = TrayIconBuilder::with_id("scrapmap")
         .tooltip("ScrapMap")
@@ -655,21 +678,27 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
                 app.exit(0);
                 Ok(())
             }
-            // Applied to the running map at once; the menu itself is rebuilt on
-            // the next start, which is the honest limit of a menu built before
-            // there was a WebView to ask.
+            // Stored first, because rebuilding the menu reads it back. The map
+            // is told separately: it is a live WebView and does not restart.
             id if id.starts_with("language:") => {
                 let code = id.trim_start_matches("language:").to_owned();
-                for (candidate, item) in &language_items {
-                    let _ = item.set_checked(*candidate == code);
-                }
-                set_interface_language(code.clone()).and_then(|()| {
-                    main_window(app).and_then(|window| {
-                        window
-                            .emit("scrapmap:language", code)
-                            .map_err(|error| error.to_string())
+                set_interface_language(code.clone())
+                    .and_then(|()| {
+                        let menu = build_tray_menu(app)?;
+                        match app.tray_by_id("scrapmap") {
+                            Some(tray) => tray
+                                .set_menu(Some(menu))
+                                .map_err(|error| error.to_string()),
+                            None => Ok(()),
+                        }
                     })
-                })
+                    .and_then(|()| {
+                        main_window(app).and_then(|window| {
+                            window
+                                .emit("scrapmap:language", code)
+                                .map_err(|error| error.to_string())
+                        })
+                    })
             }
             _ => Ok(()),
         };
@@ -697,8 +726,20 @@ fn patch_targets(state: &OverlayState) -> Result<(PathBuf, PathBuf), String> {
     let game_root = running
         .or_else(game_patch::discover_game_root)
         .ok_or("could not find Scrap Mechanic")?;
-    let cache_root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
-    Ok((game_root, cache_root))
+    let store_root = data_root().ok_or("LOCALAPPDATA is not set")?;
+    // The restore baseline used to sit inside `atlas/`, which every document
+    // here calls disposable. Deleting the cache to force a re-bake took the
+    // pristine copies with it -- and `snapshot` refuses to run over patched
+    // files, so `apply` then failed with no way back short of reverting. Move
+    // it up once, quietly; a failed move just means taking a fresh snapshot.
+    if let Some(previous) = atlas_bake::atlas_root().map(|root| root.join("vanilla")) {
+        let current = store_root.join("vanilla");
+        if previous.is_dir() && !current.exists() {
+            let _ = fs::create_dir_all(&store_root);
+            let _ = fs::rename(&previous, &current);
+        }
+    }
+    Ok((game_root, store_root))
 }
 
 /// Every interface dictionary, compiled in.
@@ -761,7 +802,7 @@ fn set_interface_language(language: String) -> Result<(), String> {
     if language.is_empty() {
         return Err("not a language code".to_owned());
     }
-    let root = atlas_bake::atlas_root().ok_or("LOCALAPPDATA is not set")?;
+    let root = data_root().ok_or("LOCALAPPDATA is not set")?;
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     fs::write(root.join("language.txt"), language).map_err(|error| error.to_string())
 }

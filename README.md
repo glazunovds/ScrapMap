@@ -7,8 +7,11 @@ markers, points of interest and player positions.
 Local-first and read-only with respect to gameplay. No Cheat Engine, no writes
 to game memory, no graphics hook, no installer and no background service.
 
-**Keywords:** Scrap Mechanic map, minimap, overlay, fog of war, points of
-interest, waypoints, survival map, world map, multiplayer positions.
+**Keywords:** Scrap Mechanic map, Scrap Mechanic minimap, Survival map,
+in-game overlay, fog of war, exploration tracker, points of interest, POI
+locations, waypoints, markers, world map, tile atlas, player coordinates,
+multiplayer player positions, co-op, warehouse and trader finder, Windows
+overlay, Steam, portable, no Cheat Engine.
 
 | | |
 |---|---|
@@ -44,13 +47,16 @@ its own. See `docs/ROADMAP.md`.
 2. Add `-dev` to Scrap Mechanic's launch options in Steam. Without it the game
    ignores the patched scripts entirely.
 3. Run `scrapmap.exe`. It adds a tray icon.
-4. **Tray → Install game patch.** This is what makes live positions work; the
-   map itself does not need it.
-5. Start the game and load a survival world. The first load bakes the tile
-   atlas — about twenty seconds, once.
+4. **Tray → Install game patch.** Not optional: the patch is what writes the
+   world layout and the terrain samples, so without it there is nothing to draw
+   but the built-in demo. It is also what reports player positions.
+5. Start the game and load a survival world. The first load exports the layout
+   and bakes the tile atlas — about twenty seconds, once.
 
 **Tray → Restore game files** puts the game back exactly, which you need before
-joining anyone who has not patched.
+joining anyone who has not patched. It restores from pristine copies taken the
+first time you patched, kept in `%LOCALAPPDATA%\ScrapMap\vanilla` so that
+verifying the game through Steam cannot take them with it.
 
 | Shortcut | Action |
 |---|---|
@@ -93,9 +99,27 @@ looks for a dev server instead of the bundled frontend.
 which is useful while developing. A released build needs neither it nor Node:
 the Lua is compiled into the executable.
 
-Runtime data lives in `%LOCALAPPDATA%\ScrapMap`: the SQLite database, the tile
-atlas cache, and `ui.log` if the panel reports a problem. Everything in the
-atlas cache is disposable and rebuilds.
+## Where things are kept
+
+Two roots, and nothing outside them: its own folder under `%LOCALAPPDATA%`, and
+the game directory while the patch is installed. Uninstalling is *Restore game
+files*, then deleting the executable and `%LOCALAPPDATA%\ScrapMap`.
+
+| Path | What it is |
+|---|---|
+| `%LOCALAPPDATA%\ScrapMap\scrapmap.sqlite3` | Profiles, fog, markers, routes |
+| `%LOCALAPPDATA%\ScrapMap\vanilla\` | Pristine game scripts; what *Restore* restores from |
+| `%LOCALAPPDATA%\ScrapMap\language.txt` | The interface language the tray reads at startup |
+| `%LOCALAPPDATA%\ScrapMap\ui.log` | Panel errors and profile decisions, if any |
+| `%LOCALAPPDATA%\ScrapMap\atlas\` | Tile images and the manifest — **disposable**, rebuilds |
+| `<game>\Survival\Scripts\…` | Four added Lua files, and two stock ones with a block appended |
+| `<game>\Survival\ScrapMapLayout.json` | The world layout, exported on world load |
+| `<game>\Survival\ScrapMapAtlas\` | Raw terrain samples the game writes during a bake |
+
+Delete the atlas cache freely to force a re-bake; nothing else in there is
+worth keeping. The other files are not caches — losing `vanilla\` means
+*Restore* has to strip the patch out of the game's own files instead of copying
+originals back, which works but is less exact.
 
 ## Documentation
 
@@ -109,10 +133,16 @@ atlas cache is disposable and rebuilds.
 | `docs/SYNC.md` | Shared fog and markers design (not started) |
 | `docs/ROADMAP.md` | Milestones and what remains |
 | `docs/DIAGNOSTIC-FEED.md` | Legacy JSON telemetry input |
+| `src-tauri/CLAUDE.md` | Rust module map, threads, the atlas pipeline |
+| `public/map/CLAUDE.md` | Renderer: load order, static frame, POI categories |
+| `game-patch/CLAUDE.md` | What each Lua file does and why it is shaped that way |
 
-Interface strings live in `public/map/locales/<code>.json`. A new language is a
-file plus one entry in `LANGUAGES` in `public/map/i18n.js`; missing keys fall
-back to English, so a partial translation is usable.
+Interface strings live in `public/map/locales/<code>.json`, and missing keys
+fall back to English, so a partial translation is usable. Adding a language is
+a new file plus an entry in `LANGUAGES` in `public/map/i18n.js` — and, because
+the tray menu exists before any WebView does, the matching entry in `LANGUAGES`
+in `src-tauri/src/lib.rs` and the two `include_str!` sites beside it. The panel
+would work without the Rust side; the tray would not list the language.
 
 ## Scope
 

@@ -90,7 +90,7 @@ impl Frame {
             return 0.0;
         }
         let luma = |chunk: &[u8]| {
-            (0.299 * f32::from(chunk[0]) + 0.587 * f32::from(chunk[1]) + 0.114 * f32::from(chunk[2]))
+            0.299 * f32::from(chunk[0]) + 0.587 * f32::from(chunk[1]) + 0.114 * f32::from(chunk[2])
         };
         let mut sum = 0.0_f64;
         let mut count = 0_u32;

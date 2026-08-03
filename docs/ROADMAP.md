@@ -7,8 +7,9 @@ with global shortcuts, SQLite profiles with world and server isolation, fog of
 war with a reveal-all control, local markers, POI categories with per-category
 icons, search and filters, live local-player telemetry, a procedurally generated
 tile atlas covering all 493 tiles with terrain, ground cover, water, hillshading,
-buildings and forest, and real photographs of every point of interest taken with
-the game's own camera.
+buildings and forest, photographs of eleven points of interest taken with the
+game's own camera, and a tray icon that installs and reverts the game patch
+without a terminal.
 
 Not working: fog and markers do not persist between players.
 
@@ -100,10 +101,15 @@ simplification remain.
 ### Release
 
 The executable carries the game patch and a tray icon, so a released build
-needs neither Node nor a checkout. What remains before publishing: screenshots
-of the English interface, and a look at whether the panel still offers things
-that no longer earn their place -- the photography button most of all, now that
-eleven photographs are kept out of a hundred and sixteen taken.
+needs neither Node nor a checkout. `README.md` has been checked claim by claim
+against the code, and two things it promised were wrong: that the map works
+without the patch (it does not -- the patch exports the layout), and that a new
+language needs no Rust change (it needs three).
+
+What remains before publishing: screenshots of the English interface, a version
+tag, and a look at whether the panel still offers things that no longer earn
+their place -- the photography button most of all, now that eleven photographs
+are kept out of a hundred and sixteen taken.
 
 ### Housekeeping
 
@@ -114,7 +120,9 @@ eleven photographs are kept out of a hundred and sixteen taken.
   drag-to-resize while holding a modifier would be better, and is deferred.
 - `MESH_UNITS_PER_METRE` is a plausibility fit, not a documented unit. If
   objects render consistently mis-sized, that is the dial.
-- No tray icon. Still absent, still arguably wanted.
+- Adding a language means editing Rust as well as JSON. A build script that
+  emitted the locale table from `public/map/locales/*.json` would make the
+  one-file promise true; today the README simply says so.
 
 ## Out of scope
 
